@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#7e47ff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Spesa</title>
+<style>
+  :root{
+    --bg:#0f0f14; --surface:#1a1a22; --surface-2:#23232e; --border:#2e2e3a;
+    --primary:#7e47ff; --primary-soft:#7e47ff22; --text:#f2f2f7; --muted:#9a9aa8;
+    --green:#2fd17a; --green-soft:#2fd17a22; --radius:16px;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f4f4f8; --surface:#ffffff; --surface-2:#f0f0f5; --border:#e3e3ec;
+      --text:#16161c; --muted:#6b6b78; --primary-soft:#7e47ff14; }
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--bg);color:var(--text);padding-bottom:env(safe-area-inset-bottom);
+    overscroll-behavior:none}
+  .app{max-width:760px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}
+  header{position:sticky;top:0;z-index:30;background:var(--bg);
+    padding:calc(env(safe-area-inset-top) + 14px) 16px 0;backdrop-filter:blur(10px)}
+  .title-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  h1{font-size:22px;margin:0;font-weight:700;letter-spacing:-.5px}
+  .tabs{display:flex;gap:6px;margin:14px 0 12px;background:var(--surface-2);
+    padding:4px;border-radius:12px}
+  .tab{flex:1;border:0;background:transparent;color:var(--muted);font-weight:600;
+    font-size:14px;padding:9px;border-radius:9px;cursor:pointer;transition:.15s}
+  .tab.active{background:var(--surface);color:var(--text);box-shadow:0 1px 4px #0003}
+  .badge{display:inline-block;min-width:18px;font-size:11px;background:var(--primary);
+    color:#fff;border-radius:9px;padding:1px 6px;margin-left:4px;font-weight:700}
+  main{flex:1;padding:8px 16px 120px}
+  .section{margin-bottom:8px;background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--radius);overflow:hidden}
+  .section-head{display:flex;align-items:center;gap:10px;padding:13px 14px;cursor:pointer;
+    font-weight:700;font-size:15px;user-select:none}
+  .section-head .chev{margin-left:auto;color:var(--muted);transition:.2s;font-size:13px}
+  .section.collapsed .chev{transform:rotate(-90deg)}
+  .section.collapsed .section-body{display:none}
+  .emoji{font-size:18px}
+  .subsection{padding:0 14px 4px}
+  .sub-label{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);
+    font-weight:700;margin:8px 0 4px;padding-left:2px}
+  .item{display:flex;align-items:center;gap:12px;padding:11px 10px;border-radius:11px;
+    transition:.12s}
+  .item:active{background:var(--surface-2)}
+  .check{width:24px;height:24px;border-radius:8px;border:2px solid var(--border);
+    flex-shrink:0;display:grid;place-items:center;cursor:pointer;transition:.15s;background:transparent}
+  .check.on{background:var(--primary);border-color:var(--primary)}
+  .check.on.bought{background:var(--green);border-color:var(--green)}
+  .check svg{width:14px;height:14px;opacity:0;transition:.15s}
+  .check.on svg{opacity:1}
+  .item-name{flex:1;font-size:15px}
+  .item.done .item-name{text-decoration:line-through;color:var(--muted)}
+  .item-act{color:var(--muted);background:none;border:0;font-size:18px;padding:4px 8px;
+    cursor:pointer;border-radius:8px;opacity:.6}
+  .item-act:active{background:var(--surface-2);opacity:1}
+  .add-row{display:flex;gap:8px;padding:6px 4px 10px}
+  .add-row input{flex:1;background:var(--surface-2);border:1px solid var(--border);
+    color:var(--text);padding:10px 12px;border-radius:10px;font-size:14px;outline:none}
+  .add-row input:focus{border-color:var(--primary)}
+  .add-row button{background:var(--primary-soft);color:var(--primary);border:0;font-weight:700;
+    padding:0 16px;border-radius:10px;cursor:pointer;font-size:18px}
+  .fab-bar{position:fixed;bottom:0;left:0;right:0;z-index:40;
+    padding:12px 16px calc(env(safe-area-inset-bottom) + 12px);
+    background:linear-gradient(transparent,var(--bg) 30%);max-width:760px;margin:0 auto}
+  .fab{width:100%;border:0;border-radius:14px;padding:16px;font-size:16px;font-weight:700;
+    cursor:pointer;background:var(--primary);color:#fff;box-shadow:0 6px 20px #7e47ff55}
+  .fab.green{background:var(--green);box-shadow:0 6px 20px #2fd17a55}
+  .fab:disabled{opacity:.4;box-shadow:none}
+  .empty{text-align:center;color:var(--muted);padding:60px 20px;font-size:15px;line-height:1.6}
+  .progress{height:6px;background:var(--surface-2);border-radius:6px;margin:0 0 14px;overflow:hidden}
+  .progress span{display:block;height:100%;background:var(--green);transition:.3s;width:0}
+  .modal-bg{position:fixed;inset:0;background:#000a;z-index:50;display:none;
+    align-items:flex-end;justify-content:center;backdrop-filter:blur(4px)}
+  .modal-bg.show{display:flex}
+  .modal{background:var(--surface);width:100%;max-width:760px;border-radius:22px 22px 0 0;
+    padding:24px 20px calc(env(safe-area-inset-bottom) + 24px);max-height:85vh;overflow:auto;
+    animation:slideup .25s ease}
+  @media(min-width:600px){.modal-bg{align-items:center}.modal{border-radius:22px;margin:20px}}
+  @keyframes slideup{from{transform:translateY(40px);opacity:.5}to{transform:none;opacity:1}}
+  .modal h2{margin:0 0 4px;font-size:21px}
+  .modal .sub{color:var(--muted);font-size:14px;margin-bottom:18px}
+  .stats{display:flex;gap:10px;margin-bottom:18px}
+  .stat{flex:1;background:var(--surface-2);border-radius:13px;padding:14px;text-align:center}
+  .stat .n{font-size:26px;font-weight:800;color:var(--primary)}
+  .stat .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+  .recap-list{list-style:none;padding:0;margin:0 0 18px}
+  .recap-list li{padding:9px 0;border-bottom:1px solid var(--border);font-size:15px;
+    display:flex;align-items:center;gap:10px}
+  .recap-list li:last-child{border:0}
+  .recap-list .cat{font-size:11px;color:var(--muted);margin-left:auto}
+  .modal-btns{display:flex;gap:10px}
+  .modal-btns button{flex:1;border:0;border-radius:12px;padding:14px;font-weight:700;
+    font-size:15px;cursor:pointer}
+  .btn-primary{background:var(--primary);color:#fff}
+  .btn-ghost{background:var(--surface-2);color:var(--text)}
+  .icon-btn{background:var(--surface-2);border:1px solid var(--border);color:var(--text);
+    width:38px;height:38px;border-radius:11px;font-size:17px;cursor:pointer;display:grid;place-items:center}
+  .hint{font-size:12px;color:var(--muted);text-align:center;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="title-row">
+      <h1>🛒 Spesa</h1>
+      <button class="icon-btn" id="resetBtn" title="Azzera selezione">↺</button>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="base">Lista base</button>
+      <button class="tab" data-tab="session">Da comprare <span class="badge" id="selBadge">0</span></button>
+    </div>
+  </header>
+  <main id="main"></main>
+</div>
+
+<div class="fab-bar" id="fabBar"></div>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <h2>Spesa completata 🎉</h2>
+    <div class="sub" id="recapDate"></div>
+    <div class="stats">
+      <div class="stat"><div class="n" id="statBought">0</div><div class="l">Comprati</div></div>
+      <div class="stat"><div class="n" id="statTotal">0</div><div class="l">In lista</div></div>
+      <div class="stat"><div class="n" id="statPct">0%</div><div class="l">Completato</div></div>
+    </div>
+    <ul class="recap-list" id="recapList"></ul>
+    <div class="modal-btns">
+      <button class="btn-ghost" id="closeModal">Chiudi</button>
+      <button class="btn-primary" id="newShop">Nuova spesa</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const KEY='spesa_v1';
+const DEFAULT={
+  sections:[
+    {id:'s1',name:'Frutta e Verdura',emoji:'🥬',subs:[
+      {name:'Frutta',items:['Mele','Banane','Limoni','Arance']},
+      {name:'Verdura',items:['Pomodori','Insalata','Zucchine','Cipolle','Carote']}
+    ]},
+    {id:'s2',name:'Proteine',emoji:'🍖',subs:[
+      {name:'Carne',items:['Pollo','Macinato']},
+      {name:'Pesce',items:['Salmone','Tonno in scatola']},
+      {name:'Uova',items:['Uova']}
+    ]},
+    {id:'s3',name:'Latticini',emoji:'🧀',subs:[
+      {name:'',items:['Latte','Yogurt greco','Parmigiano','Mozzarella']}
+    ]},
+    {id:'s4',name:'Dispensa',emoji:'🥫',subs:[
+      {name:'Pasta e riso',items:['Pasta','Riso']},
+      {name:'Altro',items:['Olio','Sale','Caffè']}
+    ]}
+  ]
+};
+
+let state = load();
+let tab = 'base';
+let collapsed = {};
+
+function load(){
+  try{ const s=JSON.parse(localStorage.getItem(KEY)); if(s&&s.sections) return migrate(s);}catch(e){}
+  return migrate(JSON.parse(JSON.stringify(DEFAULT)));
+}
+function migrate(s){
+  let i=0;
+  s.sections.forEach(sec=>sec.subs.forEach(sub=>{
+    sub.items = sub.items.map(it=> typeof it==='string'
+      ? {id:'i'+(i++)+'_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),name:it,selected:false,bought:false}
+      : it);
+  }));
+  return s;
+}
+function save(){ localStorage.setItem(KEY, JSON.stringify(state)); }
+function uid(){ return 'i'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+function allItems(){ const a=[]; state.sections.forEach(s=>s.subs.forEach(sub=>sub.items.forEach(it=>a.push({it,sec:s,sub})))); return a; }
+function selected(){ return allItems().filter(x=>x.it.selected); }
+
+const CHECK='<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
+function render(){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab));
+  document.getElementById('selBadge').textContent = selected().length;
+  const main=document.getElementById('main');
+  main.innerHTML='';
+  if(tab==='base') renderBase(main); else renderSession(main);
+  renderFab();
+  save();
+}
+
+function renderBase(main){
+  state.sections.forEach(sec=>{
+    const isCol = collapsed[sec.id];
+    const secEl=document.createElement('div');
+    secEl.className='section'+(isCol?' collapsed':'');
+    const total = sec.subs.reduce((n,s)=>n+s.items.length,0);
+    secEl.innerHTML=`<div class="section-head"><span class="emoji">${sec.emoji||'📦'}</span>${sec.name}
+      <span class="chev">▼</span></div><div class="section-body"></div>`;
+    secEl.querySelector('.section-head').onclick=()=>{collapsed[sec.id]=!isCol;render();};
+    const body=secEl.querySelector('.section-body');
+    sec.subs.forEach((sub,si)=>{
+      const wrap=document.createElement('div'); wrap.className='subsection';
+      if(sub.name) wrap.innerHTML=`<div class="sub-label">${sub.name}</div>`;
+      sub.items.forEach(it=>{
+        const row=document.createElement('div'); row.className='item';
+        row.innerHTML=`<div class="check ${it.selected?'on':''}">${CHECK}</div>
+          <span class="item-name">${it.name}</span>
+          <button class="item-act">⋯</button>`;
+        row.querySelector('.check').onclick=()=>{it.selected=!it.selected;if(!it.selected)it.bought=false;render();};
+        row.querySelector('.item-name').onclick=()=>{it.selected=!it.selected;if(!it.selected)it.bought=false;render();};
+        row.querySelector('.item-act').onclick=(e)=>{e.stopPropagation();editItem(sec,sub,it);};
+        wrap.appendChild(row);
+      });
+      const add=document.createElement('div'); add.className='add-row';
+      add.innerHTML=`<input placeholder="Aggiungi a ${sub.name||sec.name}…"><button>+</button>`;
+      const inp=add.querySelector('input');
+      const go=()=>{const v=inp.value.trim();if(!v)return;sub.items.push({id:uid(),name:v,selected:false,bought:false});inp.value='';render();};
+      add.querySelector('button').onclick=go;
+      inp.onkeydown=e=>{if(e.key==='Enter')go();};
+      wrap.appendChild(add);
+      body.appendChild(wrap);
+    });
+    main.appendChild(secEl);
+  });
+}
+
+function editItem(sec,sub,it){
+  const v=prompt('Modifica articolo (lascia vuoto per eliminare):',it.name);
+  if(v===null)return;
+  if(v.trim()===''){ sub.items=sub.items.filter(x=>x!==it); }
+  else it.name=v.trim();
+  render();
+}
+
+function renderSession(main){
+  const sel=selected();
+  if(sel.length===0){
+    main.innerHTML=`<div class="empty">Nessun articolo selezionato.<br>
+      Vai su <b>Lista base</b> e tocca gli alimenti<br>che vuoi comprare questa volta.</div>`;
+    return;
+  }
+  const bought=sel.filter(x=>x.it.bought).length;
+  const prog=document.createElement('div'); prog.className='progress';
+  prog.innerHTML=`<span style="width:${Math.round(bought/sel.length*100)}%"></span>`;
+  main.appendChild(prog);
+  // raggruppa per sezione
+  const groups={};
+  sel.forEach(x=>{(groups[x.sec.id]=groups[x.sec.id]||{sec:x.sec,items:[]}).items.push(x);});
+  Object.values(groups).forEach(g=>{
+    const secEl=document.createElement('div'); secEl.className='section';
+    secEl.innerHTML=`<div class="section-head"><span class="emoji">${g.sec.emoji||'📦'}</span>${g.sec.name}</div><div class="section-body"></div>`;
+    secEl.querySelector('.section-head').style.cursor='default';
+    const body=secEl.querySelector('.section-body'); body.style.padding='4px 14px 10px';
+    g.items.forEach(({it})=>{
+      const row=document.createElement('div'); row.className='item'+(it.bought?' done':'');
+      row.innerHTML=`<div class="check on ${it.bought?'bought':''}">${CHECK}</div>
+        <span class="item-name">${it.name}</span>`;
+      const toggle=()=>{it.bought=!it.bought;render();};
+      row.querySelector('.check').onclick=toggle;
+      row.querySelector('.item-name').onclick=toggle;
+      body.appendChild(row);
+    });
+    main.appendChild(secEl);
+  });
+}
+
+function renderFab(){
+  const bar=document.getElementById('fabBar');
+  const sel=selected();
+  if(tab==='base'){
+    bar.innerHTML=`<button class="fab" ${sel.length?'':'disabled'}>Inizia la spesa (${sel.length})</button>`;
+    if(sel.length) bar.querySelector('.fab').onclick=()=>{tab='session';render();};
+  }else if(sel.length){
+    const bought=sel.filter(x=>x.it.bought).length;
+    bar.innerHTML=`<button class="fab green">Completa spesa (${bought}/${sel.length})</button>`;
+    bar.querySelector('.fab').onclick=showRecap;
+  }else bar.innerHTML='';
+}
+
+function showRecap(){
+  const sel=selected();
+  const bought=sel.filter(x=>x.it.bought);
+  document.getElementById('statBought').textContent=bought.length;
+  document.getElementById('statTotal').textContent=sel.length;
+  document.getElementById('statPct').textContent=sel.length?Math.round(bought.length/sel.length*100)+'%':'0%';
+  document.getElementById('recapDate').textContent=new Date().toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long'});
+  const list=document.getElementById('recapList');
+  list.innerHTML = bought.length
+    ? bought.map(x=>`<li>${CHECK_GREEN}<span>${x.it.name}</span><span class="cat">${x.sec.name}</span></li>`).join('')
+    : '<li style="color:var(--muted)">Nessun articolo contrassegnato come comprato.</li>';
+  document.getElementById('modalBg').classList.add('show');
+}
+const CHECK_GREEN='<span style="color:var(--green)">✓</span>';
+
+document.getElementById('closeModal').onclick=()=>document.getElementById('modalBg').classList.remove('show');
+document.getElementById('newShop').onclick=()=>{
+  allItems().forEach(x=>{x.it.selected=false;x.it.bought=false;});
+  document.getElementById('modalBg').classList.remove('show');
+  tab='base'; render();
+};
+document.getElementById('resetBtn').onclick=()=>{
+  if(confirm('Azzerare selezione e segni di spunta?')){
+    allItems().forEach(x=>{x.it.selected=false;x.it.bought=false;}); render();
+  }
+};
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{tab=t.dataset.tab;render();});
+
+render();
+</script>
+</body>
+</html>
