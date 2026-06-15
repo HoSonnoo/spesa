@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -17,7 +17,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { Section, Subsection, Item } from '../types'
+import type { List, Section, Subsection, Item, ImportRow } from '../types'
 import DeleteSubsectionModal from './DeleteSubsectionModal'
 
 // ── Icons ────────────────────────────────────────────────────────────────────
@@ -63,6 +63,21 @@ const DOWNLOAD_ICON = (
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
     <polyline points="7 10 12 15 17 10"/>
     <line x1="12" y1="15" x2="12" y2="3"/>
+  </svg>
+)
+
+const COPY_ICON = (
+  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+  </svg>
+)
+
+const UPLOAD_ICON = (
+  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+    <polyline points="17 8 12 3 7 8"/>
+    <line x1="12" y1="3" x2="12" y2="15"/>
   </svg>
 )
 
@@ -113,6 +128,9 @@ function SortableRow({
 // ── Props ────────────────────────────────────────────────────────────────────
 
 interface Props {
+  lists: List[]
+  activeListId: string | null
+  onSetActiveListId: (id: string) => void
   sections: Section[]
   subsections: Subsection[]
   items: Item[]
@@ -131,11 +149,15 @@ interface Props {
   onMoveItemToSubsection: (itemId: string, targetSubsectionId: string, newIndex?: number) => void
   onReorderSections: (activeId: string, overId: string) => void
   onReorderSubsections: (activeId: string, overId: string) => void
+  onImportItems: (rows: ImportRow[], mode: 'overwrite' | 'add-all' | 'add-new') => void
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function BaseList({
+  lists,
+  activeListId,
+  onSetActiveListId,
   sections,
   subsections,
   items,
@@ -154,6 +176,7 @@ export default function BaseList({
   onMoveItemToSubsection,
   onReorderSections,
   onReorderSubsections,
+  onImportItems,
 }: Props) {
   // ── UI state ──────────────────────────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState('')
@@ -170,6 +193,9 @@ export default function BaseList({
   const [deleteSubModal, setDeleteSubModal] = useState<{ subsectionId: string; items: Item[] } | null>(null)
   const [moveModal, setMoveModal] = useState<{ itemId: string; targets: Subsection[] } | null>(null)
   const [exportToast, setExportToast] = useState(false)
+  const [importErrToast, setImportErrToast] = useState(false)
+  const [importRows, setImportRows] = useState<ImportRow[] | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ── Drag state ────────────────────────────────────────────────────────────
   const [localItems, setLocalItems] = useState<Item[]>(items)
@@ -186,30 +212,26 @@ export default function BaseList({
     useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 6 } }),
   )
 
-  const sortedSections = [...sections].sort((a, b) => a.position - b.position)
+  const sortedSections = [...sections]
+    .filter(s => !activeListId || s.list_id === activeListId)
+    .sort((a, b) => a.position - b.position)
 
-  // ── Export ────────────────────────────────────────────────────────────────
+  // ── Export / Import helpers ───────────────────────────────────────────────
 
-  function buildExportText(): string {
+  function buildTextContent(): string {
     const lines: string[] = [`Lista della Spesa`, `─`.repeat(22), ``]
-
     for (const section of sortedSections) {
       const sectionSubs = [...subsections]
         .filter(s => s.section_id === section.id)
         .sort((a, b) => a.position - b.position)
-
       const hasItems = sectionSubs.some(sub => items.some(i => i.subsection_id === sub.id))
       if (!hasItems) continue
-
       lines.push(`${section.emoji || `📦`} ${section.name}`)
-
       for (const sub of sectionSubs) {
         const subItems = [...items]
           .filter(i => i.subsection_id === sub.id)
           .sort((a, b) => a.position - b.position)
-
         if (subItems.length === 0) continue
-
         if (sub.name) {
           lines.push(`  ${sub.name}`)
           for (const item of subItems) lines.push(`    • ${item.name}`)
@@ -217,16 +239,90 @@ export default function BaseList({
           for (const item of subItems) lines.push(`  • ${item.name}`)
         }
       }
-
       lines.push(``)
     }
-
     return lines.join(`\n`)
   }
 
-  async function exportList() {
-    const text = buildExportText()
+  function escapeCSV(value: string): string {
+    if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+      return '"' + value.replace(/"/g, '""') + '"'
+    }
+    return value
+  }
 
+  function buildCSVContent(): string {
+    const lines = [`Emoji,Sezione,Sottosezione,Articolo`]
+    for (const section of sortedSections) {
+      const sectionSubs = [...subsections]
+        .filter(s => s.section_id === section.id)
+        .sort((a, b) => a.position - b.position)
+      for (const sub of sectionSubs) {
+        const subItems = [...items]
+          .filter(i => i.subsection_id === sub.id)
+          .sort((a, b) => a.position - b.position)
+        for (const item of subItems) {
+          lines.push([
+            escapeCSV(section.emoji || `📦`),
+            escapeCSV(section.name),
+            escapeCSV(sub.name),
+            escapeCSV(item.name),
+          ].join(`,`))
+        }
+      }
+    }
+    return lines.join(`\n`)
+  }
+
+  function parseCSVLine(line: string): string[] {
+    const result: string[] = []
+    let current = ``
+    let inQuotes = false
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]
+      if (ch === `"`) {
+        if (inQuotes && line[i + 1] === `"`) { current += `"`; i++ }
+        else inQuotes = !inQuotes
+      } else if (ch === `,` && !inQuotes) {
+        result.push(current); current = ``
+      } else {
+        current += ch
+      }
+    }
+    result.push(current)
+    return result
+  }
+
+  function parseImportCSV(raw: string): ImportRow[] {
+    const text = raw.startsWith(`﻿`) ? raw.slice(1) : raw
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+    if (lines.length < 2) return []
+    const header = parseCSVLine(lines[0]).map(h => h.toLowerCase().trim())
+    const emojiIdx = header.indexOf(`emoji`)
+    const sectionIdx = header.indexOf(`sezione`)
+    const subIdx = header.indexOf(`sottosezione`)
+    const itemIdx = header.indexOf(`articolo`)
+    if (sectionIdx === -1 || itemIdx === -1) return []
+    const rows: ImportRow[] = []
+    for (let i = 1; i < lines.length; i++) {
+      const cols = parseCSVLine(lines[i])
+      const itemName = (itemIdx < cols.length ? cols[itemIdx] : ``).trim()
+      const sectionName = (sectionIdx < cols.length ? cols[sectionIdx] : ``).trim()
+      if (!itemName || !sectionName) continue
+      rows.push({
+        emoji: emojiIdx >= 0 && emojiIdx < cols.length ? cols[emojiIdx].trim() : `📦`,
+        sectionName,
+        subsectionName: subIdx >= 0 && subIdx < cols.length ? cols[subIdx].trim() : ``,
+        itemName,
+      })
+    }
+    return rows
+  }
+
+  // ── Export / Import actions ───────────────────────────────────────────────
+
+  async function copyList() {
+    const text = buildTextContent()
     if (navigator.share) {
       try {
         await navigator.share({ title: `Lista della Spesa`, text })
@@ -235,10 +331,44 @@ export default function BaseList({
         if (e instanceof Error && e.name === `AbortError`) return
       }
     }
-
     await navigator.clipboard.writeText(text)
     setExportToast(true)
     setTimeout(() => setExportToast(false), 2200)
+  }
+
+  function downloadCSV() {
+    const csv = buildCSVContent()
+    const blob = new Blob([`﻿` + csv], { type: `text/csv;charset=utf-8;` })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement(`a`)
+    a.href = url
+    a.download = `lista-spesa-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = event => {
+      const text = event.target?.result as string
+      const rows = parseImportCSV(text)
+      if (rows.length === 0) {
+        setImportErrToast(true)
+        setTimeout(() => setImportErrToast(false), 2200)
+        return
+      }
+      if (items.length > 0) {
+        setImportRows(rows)
+      } else {
+        onImportItems(rows, `add-all`)
+      }
+    }
+    reader.readAsText(file, `utf-8`)
+    if (fileInputRef.current) fileInputRef.current.value = ``
   }
 
   // ── Search filtering ──────────────────────────────────────────────────────
@@ -440,6 +570,21 @@ export default function BaseList({
 
   return (
     <div>
+      {/* ── List selector ── */}
+      {lists.length > 0 && (
+        <div className="list-selector">
+          {[...lists].sort((a, b) => a.position - b.position).map(list => (
+            <button
+              key={list.id}
+              className={`list-selector-btn${list.id === activeListId ? ` active` : ``}`}
+              onClick={() => onSetActiveListId(list.id)}
+            >
+              {list.emoji} {list.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* ── Search bar ── */}
       {!sessionActive && (
         <div className="search-bar">
@@ -456,9 +601,24 @@ export default function BaseList({
                 <button className="search-clear" onClick={() => setSearchQuery('')}>✕</button>
               )}
             </div>
-            <button className="export-btn" onClick={exportList} title={`Esporta lista`}>
-              {DOWNLOAD_ICON}
-            </button>
+            <div className="export-actions">
+              <button className="export-btn" onClick={copyList} title={`Copia lista`}>
+                {COPY_ICON}
+              </button>
+              <button className="export-btn" onClick={downloadCSV} title={`Scarica lista (CSV)`}>
+                {DOWNLOAD_ICON}
+              </button>
+              <button className="export-btn" onClick={() => fileInputRef.current?.click()} title={`Importa lista (CSV)`}>
+                {UPLOAD_ICON}
+              </button>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              style={{ display: `none` }}
+              onChange={handleFileChange}
+            />
           </div>
         </div>
       )}
@@ -747,8 +907,44 @@ export default function BaseList({
         </div>
       )}
 
+      {/* ── Import modal ── */}
+      {importRows && (
+        <div className="modal-bg show" onClick={() => setImportRows(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h2>Importa lista</h2>
+            <p className="sub">
+              {`Trovati ${importRows.length} articoli. Hai già ${items.length} articoli nella lista base. Come vuoi procedere?`}
+            </p>
+            <div className="modal-btns" style={{ flexDirection: `column`, gap: `8px` }}>
+              <button
+                className="btn-danger-modal"
+                onClick={() => { onImportItems(importRows, `overwrite`); setImportRows(null) }}
+              >
+                Sostituisci la lista esistente
+              </button>
+              <button
+                className="btn-primary"
+                onClick={() => { onImportItems(importRows, `add-all`); setImportRows(null) }}
+              >
+                Aggiungi tutti gli alimenti
+              </button>
+              <button
+                className="btn-primary"
+                onClick={() => { onImportItems(importRows, `add-new`); setImportRows(null) }}
+              >
+                Aggiungi solo i nuovi
+              </button>
+              <button className="btn-ghost" onClick={() => setImportRows(null)}>Annulla</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {exportToast && (
         <div className="export-toast">Copiato negli appunti ✓</div>
+      )}
+      {importErrToast && (
+        <div className="export-toast">File non valido o vuoto</div>
       )}
     </div>
   )

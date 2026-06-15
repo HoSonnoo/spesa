@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useSwipeable } from 'react-swipeable'
-import type { SessionItem } from '../types'
+import type { SessionItem, Section, Subsection } from '../types'
 
 const CHECK = (
   <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -54,11 +54,11 @@ function SwipeableItem({ si, onToggleBought, onUpdateQuantity }: {
       {isSwiping && (
         <div className="swipe-bg" style={{
           background: isRight
-            ? `rgba(47,209,122,${progress * 0.45})`
+            ? `rgba(var(--primary-rgb),${progress * 0.45})`
             : `rgba(155,155,170,${progress * 0.4})`,
         }} />
       )}
-      <div className={`check on${si.bought ? ` bought` : ``}`}>{CHECK}</div>
+      <div className={`check${si.bought ? ` on` : ``}`}>{CHECK}</div>
       <span className="item-name">{si.name}</span>
       <div className="qty-stepper" onClick={e => e.stopPropagation()}>
         <button
@@ -79,15 +79,89 @@ function SwipeableItem({ si, onToggleBought, onUpdateQuantity }: {
 
 interface Props {
   sessionItems: SessionItem[]
+  sections: Section[]
+  subsections: Subsection[]
   onToggleBought: (id: string) => void
   onUpdateQuantity: (id: string, quantity: number) => void
-  onAddSessionItem: (name: string, sectionName: string) => void
+  onAddSessionItem: (name: string, sectionName: string, subsectionId?: string) => void
 }
 
-export default function ShoppingSession({ sessionItems, onToggleBought, onUpdateQuantity, onAddSessionItem }: Props) {
+export default function ShoppingSession({
+  sessionItems,
+  sections,
+  subsections,
+  onToggleBought,
+  onUpdateQuantity,
+  onAddSessionItem,
+}: Props) {
   const [addName, setAddName] = useState(``)
-  const [addSection, setAddSection] = useState(``)
   const [showAdd, setShowAdd] = useState(false)
+
+  // Modal state
+  const [showModal, setShowModal] = useState(false)
+  const [pendingName, setPendingName] = useState(``)
+  const [modalSectionId, setModalSectionId] = useState<string | null>(null)
+  const [modalSubsectionId, setModalSubsectionId] = useState<string | null>(null)
+
+  const sortedSections = [...sections].sort((a, b) => a.position - b.position)
+
+  const selectedSectionSubs = modalSectionId
+    ? [...subsections]
+        .filter(s => s.section_id === modalSectionId)
+        .sort((a, b) => a.position - b.position)
+    : []
+  const namedSubs = selectedSectionSubs.filter(s => s.name !== ``)
+  const needsSubsection = namedSubs.length > 0
+  const canConfirm = !!modalSectionId && (!needsSubsection || !!modalSubsectionId)
+
+  function handleOpenAdd() {
+    setShowAdd(true)
+  }
+
+  function handleCancelAdd() {
+    setShowAdd(false)
+    setAddName(``)
+  }
+
+  function handleAdd() {
+    const name = addName.trim()
+    if (!name) return
+    if (sections.length === 0) {
+      onAddSessionItem(name, `Altro`)
+      setAddName(``)
+      setShowAdd(false)
+      return
+    }
+    setPendingName(name)
+    setModalSectionId(null)
+    setModalSubsectionId(null)
+    setShowModal(true)
+  }
+
+  function handleSelectSection(id: string) {
+    setModalSectionId(id)
+    setModalSubsectionId(null)
+  }
+
+  function handleModalConfirm() {
+    if (!modalSectionId) return
+    const section = sortedSections.find(s => s.id === modalSectionId)
+    if (!section) return
+    onAddSessionItem(pendingName, section.name, modalSubsectionId ?? undefined)
+    setAddName(``)
+    setShowAdd(false)
+    setShowModal(false)
+    setPendingName(``)
+    setModalSectionId(null)
+    setModalSubsectionId(null)
+  }
+
+  function handleModalCancel() {
+    setShowModal(false)
+    setPendingName(``)
+    setModalSectionId(null)
+    setModalSubsectionId(null)
+  }
 
   if (sessionItems.length === 0) {
     return (
@@ -106,17 +180,6 @@ export default function ShoppingSession({ sessionItems, onToggleBought, onUpdate
   for (const si of sessionItems) {
     if (!groups[si.section_name]) groups[si.section_name] = []
     groups[si.section_name].push(si)
-  }
-
-  const uniqueSections = Object.keys(groups)
-
-  function handleAdd() {
-    const name = addName.trim()
-    if (!name) return
-    const section = addSection || uniqueSections[0] || `Altro`
-    onAddSessionItem(name, section)
-    setAddName(``)
-    setShowAdd(false)
   }
 
   return (
@@ -153,29 +216,65 @@ export default function ShoppingSession({ sessionItems, onToggleBought, onUpdate
               onKeyDown={e => { if (e.key === `Enter`) handleAdd() }}
               autoFocus
             />
-            <select
-              value={addSection}
-              onChange={e => setAddSection(e.target.value)}
-            >
-              {uniqueSections.map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-              {!uniqueSections.includes(`Altro`) && (
-                <option value="Altro">Altro</option>
-              )}
-            </select>
-            <button onClick={handleAdd}>+</button>
-            <button className="btn-cancel-sm" onClick={() => { setShowAdd(false); setAddName(``) }}>✕</button>
+            <button className="session-add-confirm" onClick={handleAdd}>+</button>
+            <button className="btn-cancel-sm" onClick={handleCancelAdd}>✕</button>
           </div>
         ) : (
-          <button
-            className="session-add-btn"
-            onClick={() => { setShowAdd(true); setAddSection(uniqueSections[0] || `Altro`) }}
-          >
+          <button className="session-add-btn" onClick={handleOpenAdd}>
             + Aggiungi articolo
           </button>
         )}
       </div>
+
+      {/* ── Settore modal ── */}
+      {showModal && (
+        <div className="modal-bg show" onClick={handleModalCancel}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h2>{`Aggiungi "${pendingName}"`}</h2>
+            <p className="sub">Scegli il settore in cui inserire l&apos;articolo.</p>
+
+            <div className="add-picker">
+              {sortedSections.map(section => (
+                <button
+                  key={section.id}
+                  className={`add-pick-btn${modalSectionId === section.id ? ` active` : ``}`}
+                  onClick={() => handleSelectSection(section.id)}
+                >
+                  {section.emoji || `📦`} {section.name}
+                </button>
+              ))}
+            </div>
+
+            {needsSubsection && (
+              <>
+                <p className="sub" style={{ marginBottom: `10px` }}>Sotto-settore</p>
+                <div className="add-picker" style={{ marginBottom: `20px` }}>
+                  {namedSubs.map(sub => (
+                    <button
+                      key={sub.id}
+                      className={`add-pick-btn${modalSubsectionId === sub.id ? ` active` : ``}`}
+                      onClick={() => setModalSubsectionId(sub.id)}
+                    >
+                      {sub.name}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div className="modal-btns">
+              <button className="btn-ghost" onClick={handleModalCancel}>Annulla</button>
+              <button
+                className="btn-primary"
+                disabled={!canConfirm}
+                onClick={handleModalConfirm}
+              >
+                Aggiungi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -3,24 +3,26 @@ import type { User } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 import Auth from './components/Auth'
 import BaseList from './components/BaseList'
-import ShoppingSession from './components/ShoppingSession'
 import ShoppingHistory from './components/ShoppingHistory'
+import ShoppingModal from './components/ShoppingModal'
 import RecapModal from './components/RecapModal'
-import type { Section, Subsection, Item, ShoppingSession as ShoppingSessionType, SessionItem } from './types'
+import type { List, Section, Subsection, Item, ShoppingSession as ShoppingSessionType, SessionItem, ImportRow } from './types'
 
 const THEMES = [
-  { id: `viola`,   label: `Viola`,   primary: `#7e47ff`, soft: `rgba(126,71,255,0.13)` },
-  { id: `verde`,   label: `Verde`,   primary: `#2eb86a`, soft: `rgba(46,184,106,0.13)` },
-  { id: `azzurro`, label: `Azzurro`, primary: `#2b8aef`, soft: `rgba(43,138,239,0.13)` },
-  { id: `arancio`, label: `Arancio`, primary: `#f5762e`, soft: `rgba(245,118,46,0.13)` },
-  { id: `rosa`,    label: `Rosa`,    primary: `#e84393`, soft: `rgba(232,67,147,0.13)` },
-  { id: `rosso`,   label: `Rosso`,   primary: `#ef4444`, soft: `rgba(239,68,68,0.13)` },
+  { id: `viola`,   label: `Viola`,   primary: `#7e47ff`, soft: `rgba(126,71,255,0.13)`,  rgb: `126,71,255`  },
+  { id: `verde`,   label: `Verde`,   primary: `#2eb86a`, soft: `rgba(46,184,106,0.13)`,  rgb: `46,184,106`  },
+  { id: `azzurro`, label: `Azzurro`, primary: `#2b8aef`, soft: `rgba(43,138,239,0.13)`,  rgb: `43,138,239`  },
+  { id: `arancio`, label: `Arancio`, primary: `#f5762e`, soft: `rgba(245,118,46,0.13)`,  rgb: `245,118,46`  },
+  { id: `rosa`,    label: `Rosa`,    primary: `#e84393`, soft: `rgba(232,67,147,0.13)`,  rgb: `232,67,147`  },
+  { id: `rosso`,   label: `Rosso`,   primary: `#ef4444`, soft: `rgba(239,68,68,0.13)`,   rgb: `239,68,68`   },
 ]
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
 
+  const [lists, setLists] = useState<List[]>([])
+  const [activeListId, setActiveListId] = useState<string | null>(null)
   const [sections, setSections] = useState<Section[]>([])
   const [subsections, setSubsections] = useState<Subsection[]>([])
   const [items, setItems] = useState<Item[]>([])
@@ -29,8 +31,9 @@ export default function App() {
   const [activeSession, setActiveSession] = useState<ShoppingSessionType | null>(null)
   const [sessionItems, setSessionItems] = useState<SessionItem[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [showModal, setShowModal] = useState(false)
 
-  const [tab, setTab] = useState<'base' | 'session' | 'history'>('base')
+  const [tab, setTab] = useState<'base' | 'history'>('base')
   const [showRecap, setShowRecap] = useState(false)
 
   const [themeId, setThemeId] = useState(() => localStorage.getItem('theme') ?? 'viola')
@@ -40,7 +43,6 @@ export default function App() {
   const [historySessionItems, setHistorySessionItems] = useState<Record<string, SessionItem[]>>({})
   const [historyLoading, setHistoryLoading] = useState(false)
 
-  // Auth state listener
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
@@ -49,42 +51,38 @@ export default function App() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // Load data on login, clear on logout
   useEffect(() => {
     if (!user) {
+      setLists([])
+      setActiveListId(null)
       setSections([])
       setSubsections([])
       setItems([])
       setActiveSession(null)
       setSessionItems([])
       setSelectedIds(new Set())
+      setShowModal(false)
       setTab('base')
       return
     }
     loadAll()
   }, [user])
 
-  // Realtime subscription for session_items (multi-device sync)
+  // Realtime sync for session items (multi-device)
   useEffect(() => {
     if (!activeSession) return
-
     const channel = supabase
       .channel(`session-${activeSession.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'session_items',
-          filter: `session_id=eq.${activeSession.id}`,
-        },
-        payload => {
-          const updated = payload.new as SessionItem
-          setSessionItems(prev => prev.map(si => si.id === updated.id ? { ...si, ...updated } : si))
-        }
-      )
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'session_items',
+        filter: `session_id=eq.${activeSession.id}`,
+      }, payload => {
+        const updated = payload.new as SessionItem
+        setSessionItems(prev => prev.map(si => si.id === updated.id ? { ...si, ...updated } : si))
+      })
       .subscribe()
-
     return () => { supabase.removeChannel(channel) }
   }, [activeSession?.id])
 
@@ -96,23 +94,64 @@ export default function App() {
     const t = THEMES.find(t => t.id === themeId) ?? THEMES[0]
     document.documentElement.style.setProperty('--primary', t.primary)
     document.documentElement.style.setProperty('--primary-soft', t.soft)
+    document.documentElement.style.setProperty('--primary-rgb', t.rgb)
     localStorage.setItem('theme', themeId)
   }, [themeId])
 
+  // ── List seeding ──────────────────────────────────────────────────────────
+
+  async function seedDefaultLists(userId: string): Promise<List[]> {
+    const defaults = [
+      { name: `Alimentare`, emoji: `🛒`, position: 0 },
+      { name: `Casa`,       emoji: `🏠`, position: 1 },
+      { name: `Hobby`,      emoji: `🎯`, position: 2 },
+    ]
+    const { data } = await supabase
+      .from('lists')
+      .insert(defaults.map(d => ({ ...d, user_id: userId })))
+      .select()
+    return (data as List[]) ?? []
+  }
+
+  // ── Data loading ──────────────────────────────────────────────────────────
+
   async function loadAll() {
+    if (!user) return
     setDataLoading(true)
 
-    const [secRes, subRes, itemRes] = await Promise.all([
+    const [secRes, subRes, itemRes, listsRes] = await Promise.all([
       supabase.from('sections').select('*').order('position'),
       supabase.from('subsections').select('*').order('position'),
       supabase.from('items').select('*').order('position'),
+      supabase.from('lists').select('*').order('position'),
     ])
 
-    if (secRes.data) setSections(secRes.data)
-    if (subRes.data) setSubsections(subRes.data)
-    if (itemRes.data) setItems(itemRes.data)
+    if (subRes.data) setSubsections(subRes.data as Subsection[])
+    if (itemRes.data) setItems(itemRes.data as Item[])
 
-    // Restore active session if one exists
+    // Load or seed lists
+    let loadedLists: List[] = (listsRes.data as List[]) ?? []
+    if (loadedLists.length === 0) {
+      loadedLists = await seedDefaultLists(user.id)
+    }
+    setLists(loadedLists)
+
+    // Set active list from saved preference or first list
+    const savedListId = localStorage.getItem('activeListId')
+    const firstValidId = loadedLists.find(l => l.id === savedListId)?.id ?? loadedLists[0]?.id ?? null
+    setActiveListId(firstValidId)
+
+    // Auto-migrate sections without list_id → assign to first list
+    let loadedSections: Section[] = (secRes.data as Section[]) ?? []
+    const orphans = loadedSections.filter(s => !s.list_id)
+    if (orphans.length > 0 && loadedLists.length > 0) {
+      const firstListId = loadedLists[0].id
+      await supabase.from('sections').update({ list_id: firstListId }).is('list_id', null)
+      loadedSections = loadedSections.map(s => s.list_id ? s : { ...s, list_id: firstListId })
+    }
+    setSections(loadedSections)
+
+    // Restore active session (without auto-opening modal)
     const { data: sessions } = await supabase
       .from('shopping_sessions')
       .select('*')
@@ -123,27 +162,30 @@ export default function App() {
     if (sessions && sessions.length > 0) {
       const session = sessions[0] as ShoppingSessionType
       setActiveSession(session)
-
       const { data: sItems } = await supabase
         .from('session_items')
         .select('*')
         .eq('session_id', session.id)
         .order('created_at')
-
       if (sItems) {
-        setSessionItems(sItems)
-        const ids = new Set(
+        setSessionItems(sItems as SessionItem[])
+        setSelectedIds(new Set(
           sItems
             .map((si: SessionItem) => si.item_id)
             .filter((id): id is string => id !== null)
-        )
-        setSelectedIds(ids)
+        ))
       }
-      setTab('session')
     }
 
     setDataLoading(false)
   }
+
+  function handleSetActiveListId(id: string) {
+    setActiveListId(id)
+    localStorage.setItem('activeListId', id)
+  }
+
+  // ── Shopping session ──────────────────────────────────────────────────────
 
   function toggleSelect(itemId: string) {
     if (activeSession) return
@@ -173,12 +215,15 @@ export default function App() {
       if (!sub) return []
       const sec = sections.find(s => s.id === sub.section_id)
       if (!sec) return []
+      const list = lists.find(l => l.id === sec.list_id)
+      const listName = list?.name ?? lists[0]?.name ?? `Alimentare`
       return [{
         session_id: session.id,
         item_id: itemId,
         user_id: user.id,
         name: item.name,
         section_name: sec.name,
+        list_name: listName,
         quantity: 1,
       }]
     })
@@ -190,12 +235,12 @@ export default function App() {
 
     if (inserted) {
       setActiveSession(session as ShoppingSessionType)
-      setSessionItems(inserted)
-      setTab('session')
+      setSessionItems(inserted as SessionItem[])
+      setShowModal(true)
     }
   }
 
-  async function addSessionItem(name: string, sectionName: string) {
+  async function addSessionItem(name: string, sectionName: string, listName: string, subsectionId?: string) {
     if (!activeSession || !user) return
     const { data } = await supabase
       .from('session_items')
@@ -205,18 +250,126 @@ export default function App() {
         user_id: user.id,
         name,
         section_name: sectionName,
+        list_name: listName,
         quantity: 1,
         bought: false,
       })
       .select()
       .single()
     if (data) setSessionItems(prev => [...prev, data as SessionItem])
+
+    // Auto-sync to base list if not already present
+    const nameNorm = name.trim().toLowerCase()
+    const alreadyExists = items.some(i => i.name.toLowerCase() === nameNorm)
+    if (!alreadyExists) {
+      const matchSection = sections.find(s => s.name === sectionName)
+      if (matchSection) {
+        let targetSubId = subsectionId
+        if (!targetSubId) {
+          const sectionSubs = subsections
+            .filter(s => s.section_id === matchSection.id)
+            .sort((a, b) => a.position - b.position)
+          targetSubId = (sectionSubs.find(s => s.name === '') ?? sectionSubs[0])?.id
+        }
+        if (targetSubId) await addItem(targetSubId, name)
+      }
+    }
   }
 
   async function updateSessionItemQuantity(sessionItemId: string, quantity: number) {
     if (quantity < 1) return
     setSessionItems(prev => prev.map(si => si.id === sessionItemId ? { ...si, quantity } : si))
     await supabase.from('session_items').update({ quantity }).eq('id', sessionItemId)
+  }
+
+  async function toggleBought(sessionItemId: string) {
+    const si = sessionItems.find(s => s.id === sessionItemId)
+    if (!si) return
+    if (!si.bought) navigator.vibrate?.(40)
+    setSessionItems(prev => prev.map(s => s.id === sessionItemId ? { ...s, bought: !s.bought } : s))
+    await supabase.from('session_items').update({ bought: !si.bought }).eq('id', sessionItemId)
+  }
+
+  async function completeSession() {
+    if (!activeSession) return
+    await supabase
+      .from('shopping_sessions')
+      .update({ status: 'completed', completed_at: new Date().toISOString() })
+      .eq('id', activeSession.id)
+    setActiveSession(null)
+    setShowModal(false)
+    setShowRecap(true)
+  }
+
+  async function resetAll() {
+    if (activeSession) {
+      if (!confirm(`Annullare la spesa in corso e azzerare la selezione?`)) return
+      await supabase.from('shopping_sessions').delete().eq('id', activeSession.id)
+      setActiveSession(null)
+      setSessionItems([])
+    }
+    setSelectedIds(new Set())
+    setShowModal(false)
+  }
+
+  function closeRecap() {
+    setShowRecap(false)
+    setSessionItems([])
+    setSelectedIds(new Set())
+  }
+
+  function newShopping() {
+    setShowRecap(false)
+    setSessionItems([])
+    setSelectedIds(new Set())
+  }
+
+  // ── History ───────────────────────────────────────────────────────────────
+
+  async function reopenSession(sessionId: string) {
+    if (activeSession) {
+      if (!confirm(`Hai già una spesa in corso. Vuoi annullarla e riaprire questa?`)) return
+      await supabase.from('shopping_sessions').delete().eq('id', activeSession.id)
+      setActiveSession(null)
+      setSessionItems([])
+      setSelectedIds(new Set())
+    }
+
+    const { data: session } = await supabase
+      .from('shopping_sessions')
+      .update({ status: `active`, completed_at: null })
+      .eq('id', sessionId)
+      .select()
+      .single()
+
+    if (!session) return
+
+    const { data: sItems } = await supabase
+      .from('session_items')
+      .select('*')
+      .eq('session_id', sessionId)
+      .order('created_at')
+
+    const restoredItems = (sItems ?? []) as SessionItem[]
+    setActiveSession(session as ShoppingSessionType)
+    setSessionItems(restoredItems)
+    setSelectedIds(new Set(
+      restoredItems.map(si => si.item_id).filter((id): id is string => id !== null)
+    ))
+    setHistorySessions(prev => prev.filter(s => s.id !== sessionId))
+    setHistorySessionItems(prev => { const n = { ...prev }; delete n[sessionId]; return n })
+    setShowModal(true)
+  }
+
+  async function deleteHistorySession(sessionId: string) {
+    if (!confirm(`Eliminare questa spesa dallo storico?`)) return
+    await supabase.from('shopping_sessions').delete().eq('id', sessionId)
+    setHistorySessions(prev => prev.filter(s => s.id !== sessionId))
+    setHistorySessionItems(prev => {
+      const next = { ...prev }
+      delete next[sessionId]
+      return next
+    })
   }
 
   async function loadHistory() {
@@ -255,54 +408,7 @@ export default function App() {
     setHistoryLoading(false)
   }
 
-  async function toggleBought(sessionItemId: string) {
-    const si = sessionItems.find(s => s.id === sessionItemId)
-    if (!si) return
-    if (!si.bought) navigator.vibrate?.(40)
-    // Optimistic update
-    setSessionItems(prev => prev.map(s => s.id === sessionItemId ? { ...s, bought: !s.bought } : s))
-    await supabase
-      .from('session_items')
-      .update({ bought: !si.bought })
-      .eq('id', sessionItemId)
-  }
-
-  async function completeSession() {
-    if (!activeSession) return
-    await supabase
-      .from('shopping_sessions')
-      .update({ status: 'completed', completed_at: new Date().toISOString() })
-      .eq('id', activeSession.id)
-    setActiveSession(null)
-    setShowRecap(true)
-  }
-
-  async function resetAll() {
-    if (activeSession) {
-      if (!confirm(`Annullare la spesa in corso e azzerare la selezione?`)) return
-      await supabase.from('shopping_sessions').delete().eq('id', activeSession.id)
-      setActiveSession(null)
-      setSessionItems([])
-    }
-    setSelectedIds(new Set())
-    setTab('base')
-  }
-
-  function closeRecap() {
-    setShowRecap(false)
-    setSessionItems([])
-    setSelectedIds(new Set())
-    setTab('base')
-  }
-
-  function newShopping() {
-    setShowRecap(false)
-    setSessionItems([])
-    setSelectedIds(new Set())
-    setTab('base')
-  }
-
-  // ── Item CRUD ──
+  // ── Item CRUD ─────────────────────────────────────────────────────────────
 
   async function addItem(subsectionId: string, name: string) {
     if (!user) return
@@ -352,19 +458,19 @@ export default function App() {
     ))
   }
 
-  // ── Section / Subsection CRUD ──
+  // ── Section / Subsection CRUD ─────────────────────────────────────────────
 
   async function addSection(name: string, emoji: string) {
-    if (!user) return
-    const position = sections.length > 0 ? Math.max(...sections.map(s => s.position)) + 1 : 0
+    if (!user || !activeListId) return
+    const listSections = sections.filter(s => s.list_id === activeListId)
+    const position = listSections.length > 0 ? Math.max(...listSections.map(s => s.position)) + 1 : 0
     const { data: sec } = await supabase
       .from('sections')
-      .insert({ user_id: user.id, name, emoji, position })
+      .insert({ user_id: user.id, name, emoji, position, list_id: activeListId })
       .select()
       .single()
     if (!sec) return
     setSections(prev => [...prev, sec as Section])
-    // Create a default empty subsection so items can be added immediately
     const { data: sub } = await supabase
       .from('subsections')
       .insert({ section_id: sec.id, user_id: user.id, name: '', position: 0 })
@@ -384,7 +490,6 @@ export default function App() {
       .single()
     if (!data) return
 
-    // Remove the default empty subsection if it exists and has no items
     const emptyDefault = subsections.find(s => s.section_id === sectionId && s.name === '')
     if (emptyDefault) {
       const hasItems = items.some(i => i.subsection_id === emptyDefault.id)
@@ -431,12 +536,9 @@ export default function App() {
 
     if (idsToMove.length > 0) {
       const siblings = subsections.filter(s => s.section_id === sub.section_id && s.id !== subsectionId)
-
-      // Cerca la sottocategoria senza nome (default) della sezione padre
       let targetSub = siblings.find(s => s.name === '')
 
       if (!targetSub) {
-        // Sposta tutte le sottocategorie esistenti di una posizione per fare spazio in cima
         const shifted = siblings.map(s => ({ ...s, position: s.position + 1 }))
         if (shifted.length > 0) {
           await Promise.all(shifted.map(s =>
@@ -456,7 +558,6 @@ export default function App() {
       }
 
       if (targetSub) {
-        // Sposta gli articoli esistenti in targetSub per fare spazio in cima
         const existingInTarget = items.filter(i => i.subsection_id === targetSub!.id)
         if (existingInTarget.length > 0) {
           await Promise.all(existingInTarget.map(i =>
@@ -468,7 +569,6 @@ export default function App() {
               : i
           ))
         }
-        // Inserisce gli articoli spostati all'inizio (posizioni 0, 1, 2…)
         await Promise.all(
           idsToMove.map((id, idx) =>
             supabase.from('items').update({ subsection_id: targetSub!.id, position: idx }).eq('id', id)
@@ -496,6 +596,89 @@ export default function App() {
     setSubsections(prev => prev.filter(s => s.id !== subsectionId))
   }
 
+  async function importItems(rows: ImportRow[], mode: 'overwrite' | 'add-all' | 'add-new') {
+    if (!user || !activeListId) return
+
+    let curSections: Section[] = [...sections]
+    let curSubsections: Subsection[] = [...subsections]
+    let curItems: Item[] = [...items]
+
+    if (mode === 'overwrite') {
+      const listSectIds = curSections.filter(s => s.list_id === activeListId).map(s => s.id)
+      const listSubIds = curSubsections.filter(s => listSectIds.includes(s.section_id)).map(s => s.id)
+      const listItemIds = curItems.filter(i => listSubIds.includes(i.subsection_id)).map(i => i.id)
+
+      if (listSectIds.length > 0) {
+        await supabase.from('sections').delete().in('id', listSectIds)
+      }
+
+      curSections = curSections.filter(s => !listSectIds.includes(s.id))
+      curSubsections = curSubsections.filter(s => !listSubIds.includes(s.id))
+      curItems = curItems.filter(i => !listItemIds.includes(i.id))
+
+      setSections(curSections)
+      setSubsections(curSubsections)
+      setItems(curItems)
+      setSelectedIds(prev => {
+        const n = new Set(prev)
+        listItemIds.forEach(id => n.delete(id))
+        return n
+      })
+    }
+
+    for (const row of rows) {
+      if (mode === 'add-new') {
+        const exists = curItems.some(i => i.name.toLowerCase() === row.itemName.toLowerCase())
+        if (exists) continue
+      }
+
+      // Find or create section within active list
+      let section = curSections.find(s => s.name === row.sectionName && s.list_id === activeListId)
+      if (!section) {
+        const listSects = curSections.filter(s => s.list_id === activeListId)
+        const pos = listSects.length > 0 ? Math.max(...listSects.map(s => s.position)) + 1 : 0
+        const { data } = await supabase
+          .from('sections')
+          .insert({ user_id: user.id, name: row.sectionName, emoji: row.emoji || `📦`, position: pos, list_id: activeListId })
+          .select()
+          .single()
+        if (!data) continue
+        section = data as Section
+        curSections = [...curSections, section]
+        setSections(prev => [...prev, section!])
+      }
+
+      // Find or create subsection
+      let subsection = curSubsections.find(s => s.section_id === section!.id && s.name === row.subsectionName)
+      if (!subsection) {
+        const subs = curSubsections.filter(s => s.section_id === section!.id)
+        const pos = subs.length > 0 ? Math.max(...subs.map(s => s.position)) + 1 : 0
+        const { data } = await supabase
+          .from('subsections')
+          .insert({ section_id: section.id, user_id: user.id, name: row.subsectionName, position: pos })
+          .select()
+          .single()
+        if (!data) continue
+        subsection = data as Subsection
+        curSubsections = [...curSubsections, subsection]
+        setSubsections(prev => [...prev, subsection!])
+      }
+
+      // Add item
+      const subItems = curItems.filter(i => i.subsection_id === subsection!.id)
+      const pos = subItems.length > 0 ? Math.max(...subItems.map(i => i.position)) + 1 : 0
+      const { data } = await supabase
+        .from('items')
+        .insert({ subsection_id: subsection.id, user_id: user.id, name: row.itemName, position: pos })
+        .select()
+        .single()
+      if (data) {
+        curItems = [...curItems, data as Item]
+        setItems(prev => [...prev, data as Item])
+      }
+    }
+  }
+
   async function moveItemToSubsection(itemId: string, targetSubsectionId: string, newIndex = -1) {
     const item = items.find(i => i.id === itemId)
     if (!item || item.subsection_id === targetSubsectionId) return
@@ -517,7 +700,10 @@ export default function App() {
 
   async function reorderSections(activeId: string, overId: string) {
     if (activeId === overId) return
-    const sorted = [...sections].sort((a, b) => a.position - b.position)
+    // Only reorder within the active list
+    const sorted = [...sections]
+      .filter(s => s.list_id === activeListId)
+      .sort((a, b) => a.position - b.position)
     const oldIdx = sorted.findIndex(s => s.id === activeId)
     const newIdx = sorted.findIndex(s => s.id === overId)
     if (oldIdx === -1 || newIdx === -1) return
@@ -525,7 +711,7 @@ export default function App() {
     const [moved] = reordered.splice(oldIdx, 1)
     reordered.splice(newIdx, 0, moved)
     const updated = reordered.map((s, i) => ({ ...s, position: i }))
-    setSections(updated)
+    setSections(prev => prev.map(s => updated.find(u => u.id === s.id) ?? s))
     await Promise.all(updated.map(s =>
       supabase.from('sections').update({ position: s.position }).eq('id', s.id)
     ))
@@ -555,6 +741,8 @@ export default function App() {
     await supabase.auth.signOut()
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────
+
   if (authLoading) {
     return <div className="loading-screen"><div className="spinner" /></div>
   }
@@ -564,7 +752,6 @@ export default function App() {
   }
 
   const selectedCount = selectedIds.size
-  const boughtCount = sessionItems.filter(si => si.bought).length
 
   return (
     <div className="app">
@@ -600,15 +787,6 @@ export default function App() {
             Lista base
           </button>
           <button
-            className={`tab${tab === 'session' ? ' active' : ''}`}
-            onClick={() => setTab('session')}
-          >
-            Da comprare{' '}
-            <span className="badge">
-              {activeSession ? sessionItems.length : selectedCount}
-            </span>
-          </button>
-          <button
             className={`tab${tab === 'history' ? ' active' : ''}`}
             onClick={() => setTab('history')}
           >
@@ -625,9 +803,14 @@ export default function App() {
             sessions={historySessions}
             sessionItems={historySessionItems}
             loading={historyLoading}
+            onDeleteSession={deleteHistorySession}
+            onReopenSession={reopenSession}
           />
-        ) : tab === 'base' ? (
+        ) : (
           <BaseList
+            lists={lists}
+            activeListId={activeListId}
+            onSetActiveListId={handleSetActiveListId}
             sections={sections}
             subsections={subsections}
             items={items}
@@ -646,44 +829,43 @@ export default function App() {
             onMoveItemToSubsection={moveItemToSubsection}
             onReorderSections={reorderSections}
             onReorderSubsections={reorderSubsections}
-          />
-        ) : (
-          <ShoppingSession
-            sessionItems={sessionItems}
-            onToggleBought={toggleBought}
-            onUpdateQuantity={updateSessionItemQuantity}
-            onAddSessionItem={addSessionItem}
+            onImportItems={importItems}
           />
         )}
       </main>
 
+      {/* ── FAB ── */}
       <div className="fab-bar">
-        {tab === 'base' && !activeSession && (
+        {!showModal && !activeSession && selectedCount > 0 && (
           <>
-            <button
-              className="fab"
-              disabled={selectedCount === 0}
-              onClick={startShopping}
-            >
+            <button className="fab" onClick={startShopping}>
               {`Inizia la spesa (${selectedCount})`}
             </button>
-            {selectedCount > 0 && (
-              <p className="hint">Premi per avviare la sessione di spesa</p>
-            )}
+            <p className="hint">Premi per avviare la sessione di spesa</p>
           </>
         )}
-        {tab === 'base' && activeSession && (
-          <button className="fab" onClick={() => setTab('session')}>
-            {`Vai alla spesa → (${sessionItems.length} articoli)`}
-          </button>
-        )}
-        {tab === 'session' && activeSession && (
-          <button className="fab green" onClick={completeSession}>
-            {`Completa spesa (${boughtCount}/${sessionItems.length})`}
+        {!showModal && activeSession && (
+          <button className="fab" onClick={() => setShowModal(true)}>
+            {`Riprendi la spesa → (${sessionItems.length} articoli)`}
           </button>
         )}
       </div>
 
+      {/* ── Shopping modal ── */}
+      <ShoppingModal
+        show={showModal}
+        sessionItems={sessionItems}
+        lists={lists}
+        sections={sections}
+        subsections={subsections}
+        onToggleBought={toggleBought}
+        onUpdateQuantity={updateSessionItemQuantity}
+        onAddSessionItem={addSessionItem}
+        onCompleteSession={completeSession}
+        onClose={() => setShowModal(false)}
+      />
+
+      {/* ── Recap modal ── */}
       {showRecap && (
         <RecapModal
           sessionItems={sessionItems}

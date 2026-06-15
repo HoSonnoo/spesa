@@ -1,5 +1,15 @@
+export interface List {
+  id: string
+  user_id: string
+  name: string
+  emoji: string
+  position: number
+  created_at: string
+}
+
 export interface Section {
   id: string
+  list_id: string | null
   user_id: string
   name: string
   emoji: string
@@ -40,7 +50,15 @@ export interface SessionItem {
   user_id: string
   name: string
   section_name: string
+  list_name: string
   quantity: number
   bought: boolean
   created_at: string
+}
+
+export interface ImportRow {
+  emoji: string
+  sectionName: string
+  subsectionName: string
+  itemName: string
 }

@@ -1,10 +1,28 @@
 import { useState } from 'react'
 import type { ShoppingSession, SessionItem } from '../types'
 
+const REOPEN_ICON = (
+  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+    <path d="M3 3v5h5"/>
+  </svg>
+)
+
+const TRASH_ICON = (
+  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="3 6 5 6 21 6"/>
+    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+    <path d="M10 11v6M14 11v6"/>
+    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+  </svg>
+)
+
 interface Props {
   sessions: ShoppingSession[]
   sessionItems: Record<string, SessionItem[]>
   loading: boolean
+  onDeleteSession: (sessionId: string) => void
+  onReopenSession: (sessionId: string) => void
 }
 
 function formatDate(iso: string | null): string {
@@ -17,7 +35,7 @@ function formatDate(iso: string | null): string {
   })
 }
 
-export default function ShoppingHistory({ sessions, sessionItems, loading }: Props) {
+export default function ShoppingHistory({ sessions, sessionItems, loading, onDeleteSession, onReopenSession }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   function toggle(id: string) {
@@ -59,7 +77,7 @@ export default function ShoppingHistory({ sessions, sessionItems, loading }: Pro
 
         return (
           <div key={session.id} className={`history-card${isOpen ? ' open' : ''}`}>
-            <button className="history-head" onClick={() => toggle(session.id)}>
+            <div className="history-head" onClick={() => toggle(session.id)}>
               <div className="history-meta">
                 <span className="history-date">{formatDate(session.completed_at)}</span>
                 <div className="history-stats">
@@ -67,8 +85,22 @@ export default function ShoppingHistory({ sessions, sessionItems, loading }: Pro
                   <span className={`history-badge history-badge--pct${pct === 100 ? ' full' : ''}`}>{pct}%</span>
                 </div>
               </div>
+              <button
+                className="history-reopen-btn"
+                title={`Riapri spesa`}
+                onClick={e => { e.stopPropagation(); onReopenSession(session.id) }}
+              >
+                {REOPEN_ICON}
+              </button>
+              <button
+                className="history-delete-btn"
+                title={`Elimina spesa`}
+                onClick={e => { e.stopPropagation(); onDeleteSession(session.id) }}
+              >
+                {TRASH_ICON}
+              </button>
               <span className={`chev${isOpen ? ' open' : ''}`}>▼</span>
-            </button>
+            </div>
 
             {isOpen && (
               <div className="history-body">
