@@ -131,6 +131,10 @@ interface Props {
   lists: List[]
   activeListId: string | null
   onSetActiveListId: (id: string) => void
+  onAddList: (name: string, emoji: string) => void
+  onUpdateList: (id: string, name: string, emoji: string) => void
+  onDeleteList: (id: string) => void
+  onReorderLists: (activeId: string, overId: string) => void
   sections: Section[]
   subsections: Subsection[]
   items: Item[]
@@ -158,6 +162,10 @@ export default function BaseList({
   lists,
   activeListId,
   onSetActiveListId,
+  onAddList,
+  onUpdateList,
+  onDeleteList,
+  onReorderLists,
   sections,
   subsections,
   items,
@@ -193,6 +201,13 @@ export default function BaseList({
   const [deleteSubModal, setDeleteSubModal] = useState<{ subsectionId: string; items: Item[] } | null>(null)
   const [moveModal, setMoveModal] = useState<{ itemId: string; targets: Subsection[] } | null>(null)
   const [exportToast, setExportToast] = useState(false)
+  const [showListManager, setShowListManager] = useState(false)
+  const [editingListId, setEditingListId] = useState<string | null>(null)
+  const [editListName, setEditListName] = useState(``)
+  const [editListEmoji, setEditListEmoji] = useState(``)
+  const [newListName, setNewListName] = useState(``)
+  const [newListEmoji, setNewListEmoji] = useState(``)
+  const [showAddList, setShowAddList] = useState(false)
   const [importErrToast, setImportErrToast] = useState(false)
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -211,6 +226,8 @@ export default function BaseList({
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 6 } }),
   )
+
+  const sortedLists = [...lists].sort((a, b) => a.position - b.position)
 
   const sortedSections = [...sections]
     .filter(s => !activeListId || s.list_id === activeListId)
@@ -531,6 +548,29 @@ export default function BaseList({
     }
   }
 
+  // ── List manager helpers ──────────────────────────────────────────────────
+
+  function saveEditList(listId: string) {
+    const name = editListName.trim()
+    if (name) onUpdateList(listId, name, editListEmoji.trim() || `📋`)
+    setEditingListId(null)
+  }
+
+  function handleAddList() {
+    const name = newListName.trim()
+    if (!name) return
+    onAddList(name, newListEmoji.trim() || `📋`)
+    setNewListName(``)
+    setNewListEmoji(``)
+    setShowAddList(false)
+  }
+
+  function closeListManager() {
+    setShowListManager(false)
+    setEditingListId(null)
+    setShowAddList(false)
+  }
+
   // ── Add section UI ────────────────────────────────────────────────────────
 
   const addSectionUI = !sessionActive && !isSearching && (
@@ -573,7 +613,7 @@ export default function BaseList({
       {/* ── List selector ── */}
       {lists.length > 0 && (
         <div className="list-selector">
-          {[...lists].sort((a, b) => a.position - b.position).map(list => (
+          {sortedLists.map(list => (
             <button
               key={list.id}
               className={`list-selector-btn${list.id === activeListId ? ` active` : ``}`}
@@ -582,6 +622,11 @@ export default function BaseList({
               {list.emoji} {list.name}
             </button>
           ))}
+          <button
+            className="list-selector-manage"
+            onClick={() => setShowListManager(true)}
+            title="Gestisci liste"
+          >⚙</button>
         </div>
       )}
 
@@ -867,6 +912,100 @@ export default function BaseList({
       </DndContext>
 
       {addSectionUI}
+
+      {/* ── List manager modal ── */}
+      {showListManager && (
+        <div className="modal-bg show" onClick={closeListManager}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h2>Gestisci liste</h2>
+            <p className="sub">Trascina per riordinare. Tocca il nome per modificarlo.</p>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={e => {
+                if (e.over) onReorderLists(String(e.active.id), String(e.over.id))
+              }}
+            >
+              <SortableContext items={sortedLists.map(l => l.id)} strategy={verticalListSortingStrategy}>
+                <div className="list-manager-rows">
+                  {sortedLists.map(list => (
+                    <SortableRow key={list.id} id={list.id}>
+                      {({ setNodeRef, style, handleProps }) => (
+                        <div ref={setNodeRef} style={style} className="list-manager-row">
+                          <button className="drag-handle" {...handleProps} onClick={e => e.stopPropagation()}>
+                            {GRIP}
+                          </button>
+                          {editingListId === list.id ? (
+                            <>
+                              <input
+                                className="emoji-input"
+                                value={editListEmoji}
+                                onChange={e => setEditListEmoji(e.target.value)}
+                                maxLength={4}
+                                style={{ width: `48px` }}
+                              />
+                              <input
+                                className="list-manager-name-input"
+                                value={editListName}
+                                onChange={e => setEditListName(e.target.value)}
+                                onBlur={() => saveEditList(list.id)}
+                                onKeyDown={e => {
+                                  if (e.key === `Enter`) saveEditList(list.id)
+                                  if (e.key === `Escape`) setEditingListId(null)
+                                }}
+                                autoFocus
+                              />
+                            </>
+                          ) : (
+                            <span
+                              className="list-manager-name"
+                              onClick={() => { setEditingListId(list.id); setEditListName(list.name); setEditListEmoji(list.emoji) }}
+                            >
+                              {list.emoji} {list.name}
+                            </span>
+                          )}
+                          <button
+                            className="move-btn danger"
+                            onClick={() => { onDeleteList(list.id) }}
+                            disabled={lists.length <= 1}
+                          >🗑</button>
+                        </div>
+                      )}
+                    </SortableRow>
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+            {showAddList ? (
+              <div className="add-section-form" style={{ marginTop: `12px` }}>
+                <input
+                  className="emoji-input"
+                  placeholder="📋"
+                  value={newListEmoji}
+                  onChange={e => setNewListEmoji(e.target.value)}
+                  maxLength={4}
+                />
+                <input
+                  placeholder="Nome lista"
+                  value={newListName}
+                  onChange={e => setNewListName(e.target.value)}
+                  onKeyDown={e => { if (e.key === `Enter`) handleAddList() }}
+                  autoFocus
+                />
+                <button className="btn-add" onClick={handleAddList}>+</button>
+                <button className="btn-cancel-sm" onClick={() => { setShowAddList(false); setNewListName(``); setNewListEmoji(``) }}>✕</button>
+              </div>
+            ) : (
+              <button className="add-section-btn" style={{ marginTop: `12px` }} onClick={() => setShowAddList(true)}>
+                + Nuova lista
+              </button>
+            )}
+            <div className="modal-btns" style={{ marginTop: `16px` }}>
+              <button className="btn-primary" onClick={closeListManager}>Fatto</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Delete subsection modal ── */}
       {deleteSubModal && (

@@ -2,6 +2,8 @@ import { useState, useRef } from 'react'
 import { useSwipeable } from 'react-swipeable'
 import type { SessionItem, List, Section, Subsection } from '../types'
 
+// ── Icons ─────────────────────────────────────────────────────────────────────
+
 const CHECK = (
   <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="20 6 9 17 4 12" />
@@ -70,25 +72,54 @@ function SwipeableItem({ si, onToggleBought, onUpdateQuantity }: {
       <div className={`check${si.bought ? ` on` : ``}`}>{CHECK}</div>
       <span className="item-name">{si.name}</span>
       <div className="qty-stepper" onClick={e => e.stopPropagation()}>
-        <button
-          className="qty-btn"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onUpdateQuantity(si.id, Math.max(1, si.quantity - 1))}
-        >−</button>
+        <button className="qty-btn" onMouseDown={e => e.preventDefault()} onClick={() => onUpdateQuantity(si.id, Math.max(1, si.quantity - 1))}>−</button>
         <span className="qty-val">{si.quantity}</span>
-        <button
-          className="qty-btn"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onUpdateQuantity(si.id, si.quantity + 1)}
-        >+</button>
+        <button className="qty-btn" onMouseDown={e => e.preventDefault()} onClick={() => onUpdateQuantity(si.id, si.quantity + 1)}>+</button>
       </div>
     </div>
   )
 }
 
-// ── Per-list page ─────────────────────────────────────────────────────────────
+// ── SectionCard ───────────────────────────────────────────────────────────────
 
-interface ListPageProps {
+function SectionCard({ sectionName, items, animKey, onToggleBought, onUpdateQuantity }: {
+  sectionName: string
+  items: SessionItem[]
+  animKey: number
+  onToggleBought: (id: string) => void
+  onUpdateQuantity: (id: string, qty: number) => void
+}) {
+  const boughtCount = items.filter(si => si.bought).length
+  const total = items.length
+  const pct = total > 0 ? Math.round((boughtCount / total) * 100) : 0
+
+  return (
+    <div key={animKey} className="section-card">
+      <div className="section-card-head">
+        <span className="section-card-name">{sectionName}</span>
+        <span className="section-card-badge">{boughtCount}/{total}</span>
+        {pct === 100 && <span className="section-card-done">✓</span>}
+      </div>
+      <div className={`progress${pct === 100 ? ` complete` : ``}`} style={{ margin: 0, borderRadius: 0 }}>
+        <span style={{ width: `${pct}%` }} />
+      </div>
+      <div className="section-card-body">
+        {items.map(si => (
+          <SwipeableItem
+            key={si.id}
+            si={si}
+            onToggleBought={onToggleBought}
+            onUpdateQuantity={onUpdateQuantity}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── ListSections (one list's section carousel) ────────────────────────────────
+
+interface ListSectionsProps {
   list: List
   sessionItems: SessionItem[]
   sections: Section[]
@@ -98,7 +129,7 @@ interface ListPageProps {
   onAddSessionItem: (name: string, sectionName: string, listName: string, subsectionId?: string) => void
 }
 
-function ListPage({
+function ListSections({
   list,
   sessionItems,
   sections,
@@ -106,35 +137,56 @@ function ListPage({
   onToggleBought,
   onUpdateQuantity,
   onAddSessionItem,
-}: ListPageProps) {
+}: ListSectionsProps) {
+  const [sectionIdx, setSectionIdx] = useState(0)
+  const [animKey, setAnimKey] = useState(0)
   const [showAdd, setShowAdd] = useState(false)
   const [addName, setAddName] = useState(``)
   const [pendingName, setPendingName] = useState<string | null>(null)
   const [modalSectionId, setModalSectionId] = useState<string | null>(null)
   const [modalSubsectionId, setModalSubsectionId] = useState<string | null>(null)
 
+  const touchStartX = useRef(0)
+  const touchOnItem = useRef(false)
+
   const listItems = sessionItems.filter(si => si.list_name === list.name)
+  // Collect unique section names in session order
+  const sectionNames = listItems.reduce<string[]>((acc, si) => {
+    if (si.section_name && !acc.includes(si.section_name)) acc.push(si.section_name)
+    return acc
+  }, [])
+
+  const safeSectionIdx = Math.min(sectionIdx, Math.max(0, sectionNames.length - 1))
+  const currentSectionName = sectionNames[safeSectionIdx] ?? null
+
   const listSections = sections
     .filter(s => s.list_id === list.id)
     .sort((a, b) => a.position - b.position)
 
-  const boughtCount = listItems.filter(si => si.bought).length
-  const total = listItems.length
-  const pct = total > 0 ? Math.round((boughtCount / total) * 100) : 0
-
-  const groups: Record<string, SessionItem[]> = {}
-  for (const si of listItems) {
-    if (!groups[si.section_name]) groups[si.section_name] = []
-    groups[si.section_name].push(si)
-  }
-
   const selectedSectionSubs = modalSectionId
-    ? subsections
-        .filter(s => s.section_id === modalSectionId)
-        .sort((a, b) => a.position - b.position)
+    ? subsections.filter(s => s.section_id === modalSectionId).sort((a, b) => a.position - b.position)
     : []
   const namedSubs = selectedSectionSubs.filter(s => s.name !== ``)
   const canConfirm = !!modalSectionId && (namedSubs.length === 0 || !!modalSubsectionId)
+
+  function navigate(newIdx: number) {
+    setSectionIdx(newIdx)
+    setAnimKey(k => k + 1)
+  }
+
+  function handleTouchStart(e: React.TouchEvent) {
+    touchStartX.current = e.touches[0].clientX
+    touchOnItem.current = !!(e.target as Element).closest(`.item`)
+  }
+
+  function handleTouchEnd(e: React.TouchEvent) {
+    if (touchOnItem.current || sectionNames.length <= 1) return
+    const dx = e.changedTouches[0].clientX - touchStartX.current
+    if (Math.abs(dx) > 60) {
+      if (dx < 0 && safeSectionIdx < sectionNames.length - 1) navigate(safeSectionIdx + 1)
+      if (dx > 0 && safeSectionIdx > 0) navigate(safeSectionIdx - 1)
+    }
+  }
 
   function handleAdd() {
     const name = addName.trim()
@@ -146,7 +198,9 @@ function ListPage({
       return
     }
     setPendingName(name)
-    setModalSectionId(null)
+    // Pre-select section matching current section name
+    const matchSec = listSections.find(s => s.name === currentSectionName)
+    setModalSectionId(matchSec?.id ?? null)
     setModalSubsectionId(null)
   }
 
@@ -169,46 +223,62 @@ function ListPage({
   }
 
   return (
-    <div className="shopping-page">
-      {total > 0 && (
-        <div className={`progress${pct === 100 ? ` complete` : ``}`}>
-          <span style={{ width: `${pct}%` }} />
-        </div>
-      )}
-
-      {total === 0 ? (
-        <div style={{ padding: `32px 20px`, textAlign: `center`, color: `var(--muted)`, fontSize: `14px` }}>
-          {`Nessun articolo selezionato per ${list.emoji} ${list.name}.`}
-          <br />
-          <span style={{ fontSize: `13px`, marginTop: `4px`, display: `block` }}>
-            Aggiungi articoli qui sotto oppure selezionali dalla Lista base.
-          </span>
+    <div>
+      {sectionNames.length === 0 ? (
+        <div className="section-card" style={{ margin: `16px` }}>
+          <div style={{ padding: `32px 20px`, textAlign: `center`, color: `var(--muted)`, fontSize: `14px` }}>
+            {`Nessun articolo selezionato per ${list.emoji} ${list.name}.`}
+          </div>
         </div>
       ) : (
-        Object.entries(groups).map(([sectionName, groupItems]) => (
-          <div key={sectionName} className="section">
-            <div className="section-head" style={{ cursor: `default` }}>
-              {sectionName}
-            </div>
-            <div className="section-body" style={{ padding: `4px 14px 10px` }}>
-              {groupItems.map(si => (
-                <SwipeableItem
-                  key={si.id}
-                  si={si}
-                  onToggleBought={onToggleBought}
-                  onUpdateQuantity={onUpdateQuantity}
-                />
-              ))}
-            </div>
-          </div>
-        ))
+        <div
+          className="section-carousel-wrap"
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
+          <SectionCard
+            key={animKey}
+            sectionName={currentSectionName!}
+            items={listItems.filter(si => si.section_name === currentSectionName)}
+            animKey={animKey}
+            onToggleBought={onToggleBought}
+            onUpdateQuantity={onUpdateQuantity}
+          />
+        </div>
       )}
 
+      {/* Navigation: arrows + dots */}
+      {sectionNames.length > 1 && (
+        <div className="section-nav">
+          <button
+            className="section-nav-arrow"
+            disabled={safeSectionIdx === 0}
+            onClick={() => navigate(safeSectionIdx - 1)}
+          >‹</button>
+          <div className="section-dots-row">
+            {sectionNames.map((name, i) => (
+              <button
+                key={i}
+                className={`modal-dot${i === safeSectionIdx ? ` active` : ``}`}
+                onClick={() => navigate(i)}
+                title={name}
+              />
+            ))}
+          </div>
+          <button
+            className="section-nav-arrow"
+            disabled={safeSectionIdx === sectionNames.length - 1}
+            onClick={() => navigate(safeSectionIdx + 1)}
+          >›</button>
+        </div>
+      )}
+
+      {/* Add item */}
       <div className="session-add">
         {showAdd ? (
           <div className="session-add-form">
             <input
-              placeholder={`Nome articolo…`}
+              placeholder={currentSectionName ? `Aggiungi a ${currentSectionName}…` : `Nome articolo…`}
               value={addName}
               onChange={e => setAddName(e.target.value)}
               onKeyDown={e => { if (e.key === `Enter`) handleAdd() }}
@@ -224,6 +294,7 @@ function ListPage({
         )}
       </div>
 
+      {/* Section picker modal */}
       {pendingName && (
         <div className="modal-bg show" onClick={closePickerModal}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -296,33 +367,14 @@ export default function ShoppingModal({
   onCompleteSession,
   onClose,
 }: Props) {
-  const [page, setPage] = useState(0)
-  const touchStartX = useRef(0)
-  const touchStartY = useRef(0)
-  const touchOnItem = useRef(false)
+  const [listPage, setListPage] = useState(0)
 
   const activeLists = lists.filter(l => sessionItems.some(si => si.list_name === l.name))
   const displayLists = activeLists.length > 0 ? activeLists : lists.slice(0, 1)
-  const currentPage = Math.min(page, Math.max(0, displayLists.length - 1))
+  const currentListPage = Math.min(listPage, Math.max(0, displayLists.length - 1))
 
   const boughtCount = sessionItems.filter(si => si.bought).length
   const total = sessionItems.length
-
-  function handleTouchStart(e: React.TouchEvent) {
-    touchStartX.current = e.touches[0].clientX
-    touchStartY.current = e.touches[0].clientY
-    touchOnItem.current = !!(e.target as Element).closest(`.item`)
-  }
-
-  function handleTouchEnd(e: React.TouchEvent) {
-    if (touchOnItem.current || displayLists.length <= 1) return
-    const dx = e.changedTouches[0].clientX - touchStartX.current
-    const dy = e.changedTouches[0].clientY - touchStartY.current
-    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 60) {
-      if (dx < 0 && currentPage < displayLists.length - 1) setPage(p => Math.min(p + 1, displayLists.length - 1))
-      if (dx > 0 && currentPage > 0) setPage(p => Math.max(p - 1, 0))
-    }
-  }
 
   if (!show) return null
 
@@ -332,9 +384,7 @@ export default function ShoppingModal({
 
         {/* ── Header ── */}
         <div className="shopping-modal-header">
-          <button className="icon-btn" onClick={onClose} title={`Chiudi`}>
-            {CLOSE_ICON}
-          </button>
+          <button className="icon-btn" onClick={onClose} title={`Chiudi`}>{CLOSE_ICON}</button>
           <span className="shopping-modal-title">
             {total > 0 ? `${boughtCount} / ${total} articoli` : `Spesa in corso`}
           </span>
@@ -343,14 +393,14 @@ export default function ShoppingModal({
           </button>
         </div>
 
-        {/* ── List tabs (only when multiple lists) ── */}
+        {/* ── List tabs (solo se più liste) ── */}
         {displayLists.length > 1 && (
           <div className="shopping-modal-tabs">
             {displayLists.map((list, i) => (
               <button
                 key={list.id}
-                className={`shopping-modal-tab${i === currentPage ? ` active` : ``}`}
-                onClick={() => setPage(i)}
+                className={`shopping-modal-tab${i === currentListPage ? ` active` : ``}`}
+                onClick={() => setListPage(i)}
               >
                 {list.emoji} {list.name}
               </button>
@@ -358,19 +408,15 @@ export default function ShoppingModal({
           </div>
         )}
 
-        {/* ── Swipeable body ── */}
-        <div
-          className="shopping-modal-body"
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
-        >
+        {/* ── Swipeable list body ── */}
+        <div className="shopping-modal-body">
           <div
             className="shopping-pages-inner"
-            style={{ transform: `translateX(-${currentPage * 100}%)` }}
+            style={{ transform: `translateX(-${currentListPage * 100}%)` }}
           >
             {displayLists.map(list => (
               <div key={list.id} className="shopping-page-slot">
-                <ListPage
+                <ListSections
                   list={list}
                   sessionItems={sessionItems}
                   sections={sections}
@@ -384,14 +430,14 @@ export default function ShoppingModal({
           </div>
         </div>
 
-        {/* ── Page indicator dots ── */}
+        {/* ── List dots ── */}
         {displayLists.length > 1 && (
           <div className="shopping-modal-dots">
             {displayLists.map((_, i) => (
               <button
                 key={i}
-                className={`modal-dot${i === currentPage ? ` active` : ``}`}
-                onClick={() => setPage(i)}
+                className={`modal-dot${i === currentListPage ? ` active` : ``}`}
+                onClick={() => setListPage(i)}
               />
             ))}
           </div>

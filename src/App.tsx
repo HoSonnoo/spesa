@@ -185,6 +185,68 @@ export default function App() {
     localStorage.setItem('activeListId', id)
   }
 
+  // ── List management ───────────────────────────────────────────────────────
+
+  async function addList(name: string, emoji: string) {
+    if (!user) return
+    const position = lists.length > 0 ? Math.max(...lists.map(l => l.position)) + 1 : 0
+    const { data } = await supabase
+      .from('lists')
+      .insert({ user_id: user.id, name, emoji, position })
+      .select()
+      .single()
+    if (data) setLists(prev => [...prev, data as List])
+  }
+
+  async function updateList(id: string, name: string, emoji: string) {
+    setLists(prev => prev.map(l => l.id === id ? { ...l, name, emoji } : l))
+    await supabase.from('lists').update({ name, emoji }).eq('id', id)
+  }
+
+  async function deleteList(id: string) {
+    if (lists.length <= 1) {
+      alert(`Devi avere almeno una lista.`)
+      return
+    }
+    if (!confirm(`Eliminare questa lista e tutti i suoi contenuti?`)) return
+    const listSectionIds = sections.filter(s => s.list_id === id).map(s => s.id)
+    const listSubIds = subsections.filter(s => listSectionIds.includes(s.section_id)).map(s => s.id)
+    const listItemIds = items.filter(i => listSubIds.includes(i.subsection_id)).map(i => i.id)
+    await supabase.from('lists').delete().eq('id', id)
+    const newLists = lists.filter(l => l.id !== id)
+    setLists(newLists)
+    setSections(prev => prev.filter(s => s.list_id !== id))
+    setSubsections(prev => prev.filter(s => !listSectionIds.includes(s.section_id)))
+    setItems(prev => prev.filter(i => !listSubIds.includes(i.subsection_id)))
+    setSelectedIds(prev => {
+      const n = new Set(prev)
+      listItemIds.forEach(x => n.delete(x))
+      return n
+    })
+    if (activeListId === id) {
+      const newActiveId = newLists[0]?.id ?? null
+      setActiveListId(newActiveId)
+      if (newActiveId) localStorage.setItem('activeListId', newActiveId)
+      else localStorage.removeItem('activeListId')
+    }
+  }
+
+  async function reorderLists(activeId: string, overId: string) {
+    if (activeId === overId) return
+    const sorted = [...lists].sort((a, b) => a.position - b.position)
+    const oldIdx = sorted.findIndex(l => l.id === activeId)
+    const newIdx = sorted.findIndex(l => l.id === overId)
+    if (oldIdx === -1 || newIdx === -1) return
+    const reordered = [...sorted]
+    const [moved] = reordered.splice(oldIdx, 1)
+    reordered.splice(newIdx, 0, moved)
+    const updated = reordered.map((l, i) => ({ ...l, position: i }))
+    setLists(updated)
+    await Promise.all(updated.map(l =>
+      supabase.from('lists').update({ position: l.position }).eq('id', l.id)
+    ))
+  }
+
   // ── Shopping session ──────────────────────────────────────────────────────
 
   function toggleSelect(itemId: string) {
@@ -811,6 +873,10 @@ export default function App() {
             lists={lists}
             activeListId={activeListId}
             onSetActiveListId={handleSetActiveListId}
+            onAddList={addList}
+            onUpdateList={updateList}
+            onDeleteList={deleteList}
+            onReorderLists={reorderLists}
             sections={sections}
             subsections={subsections}
             items={items}
