@@ -11,6 +11,7 @@ export default function RecapModal({ sessionItems, createdAt, onClose, onNewShop
   const bought = sessionItems.filter(si => si.bought)
   const total = sessionItems.length
   const pct = total > 0 ? Math.round((bought.length / total) * 100) : 0
+  const totalSpent = bought.reduce((sum, si) => sum + (si.price ?? 0) * si.quantity, 0)
   const dateStr = new Date(createdAt).toLocaleDateString('it-IT', {
     weekday: 'long',
     day: 'numeric',
@@ -35,6 +36,12 @@ export default function RecapModal({ sessionItems, createdAt, onClose, onNewShop
             <div className="n">{pct}%</div>
             <div className="l">Completato</div>
           </div>
+          {totalSpent > 0 && (
+            <div className="stat">
+              <div className="n" style={{ fontSize: '20px' }}>{`€ ${totalSpent.toFixed(2)}`}</div>
+              <div className="l">Speso</div>
+            </div>
+          )}
         </div>
         <ul className="recap-list">
           {bought.length > 0

@@ -96,6 +96,74 @@ function highlight(text: string, query: string): React.ReactNode {
   )
 }
 
+// ── SwipeDeleteItem ───────────────────────────────────────────────────────────
+
+function SwipeDeleteItem({
+  setNodeRef,
+  style,
+  isDragging,
+  disabled,
+  children,
+  onDelete,
+}: {
+  setNodeRef: (el: HTMLElement | null) => void
+  style: React.CSSProperties
+  isDragging: boolean
+  disabled: boolean
+  children: React.ReactNode
+  onDelete: () => void
+}) {
+  const [swipeX, setSwipeX] = useState(0)
+  const startX = useRef(0)
+  const startY = useRef(0)
+  const horizLocked = useRef(false)
+
+  const clamp = Math.max(-80, swipeX)
+  const prog = Math.min(1, Math.abs(clamp) / 80)
+  const isSwiping = swipeX < -8
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        ...style,
+        ...(isSwiping ? { transform: `translateX(${clamp * 0.5}px)`, transition: `none` } : {}),
+        position: `relative`,
+        overflow: `hidden`,
+      }}
+      className={`item${isDragging ? ` item--ghost` : ``}`}
+      onTouchStart={disabled ? undefined : e => {
+        startX.current = e.touches[0].clientX
+        startY.current = e.touches[0].clientY
+        horizLocked.current = false
+      }}
+      onTouchMove={disabled ? undefined : e => {
+        const dx = e.touches[0].clientX - startX.current
+        const dy = e.touches[0].clientY - startY.current
+        if (!horizLocked.current) {
+          if (Math.abs(dy) >= Math.abs(dx) || dx > 0) return
+          horizLocked.current = true
+        }
+        e.preventDefault()
+        setSwipeX(dx)
+      }}
+      onTouchEnd={disabled ? undefined : () => {
+        if (swipeX < -80) {
+          navigator.vibrate?.(30)
+          onDelete()
+        }
+        setSwipeX(0)
+        horizLocked.current = false
+      }}
+    >
+      {isSwiping && (
+        <div className="swipe-delete-bg" style={{ opacity: prog }}>🗑</div>
+      )}
+      {children}
+    </div>
+  )
+}
+
 // ── SortableRow ───────────────────────────────────────────────────────────────
 
 type SortableChildProps = {
@@ -228,10 +296,6 @@ export default function BaseList({
   )
 
   const sortedLists = [...lists].sort((a, b) => a.position - b.position)
-
-  const sortedSections = [...sections]
-    .filter(s => !activeListId || s.list_id === activeListId)
-    .sort((a, b) => a.position - b.position)
 
   // ── Export / Import helpers ───────────────────────────────────────────────
 
@@ -391,6 +455,10 @@ export default function BaseList({
   // ── Search filtering ──────────────────────────────────────────────────────
   const query = searchQuery.toLowerCase().trim()
   const isSearching = query.length > 0
+
+  const sortedSections = [...sections]
+    .filter(s => !activeListId || isSearching || s.list_id === activeListId)
+    .sort((a, b) => a.position - b.position)
 
   function itemMatchesSearch(item: Item) {
     return item.name.toLowerCase().includes(query)
@@ -705,6 +773,10 @@ export default function BaseList({
                       )}
                       <span className="emoji">{section.emoji || '📦'}</span>
                       <span className="section-name">{highlight(section.name, query)}</span>
+                      {isSearching && section.list_id !== activeListId && (() => {
+                        const list = lists.find(l => l.id === section.list_id)
+                        return list ? <span className="section-list-badge">{list.emoji} {list.name}</span> : null
+                      })()}
                       {editing ? (
                         <div className="edit-controls" onClick={e => e.stopPropagation()}>
                           <button className="move-btn danger" onClick={() => onDeleteSection(section.id)}>🗑</button>
@@ -771,10 +843,12 @@ export default function BaseList({
                                         return (
                                           <SortableRow key={item.id} id={item.id} data={{ type: 'item' }}>
                                             {({ setNodeRef: setItemRef, style: itemStyle, handleProps: itemHandleProps, isDragging: itemDragging }) => (
-                                              <div
-                                                ref={setItemRef}
+                                              <SwipeDeleteItem
+                                                setNodeRef={setItemRef}
                                                 style={itemStyle}
-                                                className={`item${itemDragging ? ' item--ghost' : ''}`}
+                                                isDragging={itemDragging}
+                                                disabled={isEditing || editing || sessionActive || isSearching}
+                                                onDelete={() => onDeleteItem(item.id)}
                                               >
                                                 {isEditing ? (
                                                   <>
@@ -838,7 +912,7 @@ export default function BaseList({
                                                     )}
                                                   </>
                                                 )}
-                                              </div>
+                                              </SwipeDeleteItem>
                                             )}
                                           </SortableRow>
                                         )

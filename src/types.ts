@@ -53,6 +53,7 @@ export interface SessionItem {
   list_name: string
   quantity: number
   bought: boolean
+  price?: number
   created_at: string
 }
 

@@ -344,6 +344,42 @@ export default function App() {
     await supabase.from('session_items').update({ quantity }).eq('id', sessionItemId)
   }
 
+  async function updateSessionItemPrice(sessionItemId: string, price: number) {
+    setSessionItems(prev => prev.map(si => si.id === sessionItemId ? { ...si, price } : si))
+    await supabase.from('session_items').update({ price }).eq('id', sessionItemId)
+  }
+
+  async function fetchSuggestions(): Promise<Array<{ name: string; section_name: string; list_name: string }>> {
+    if (!user) return []
+    const { data: completed } = await supabase
+      .from('shopping_sessions')
+      .select('id')
+      .eq('status', 'completed')
+      .eq('user_id', user.id)
+      .order('completed_at', { ascending: false })
+      .limit(20)
+    if (!completed || completed.length === 0) return []
+    const ids = completed.map((s: { id: string }) => s.id)
+    const { data } = await supabase
+      .from('session_items')
+      .select('name, section_name, list_name')
+      .in('session_id', ids)
+      .eq('bought', true)
+    if (!data) return []
+    const freq: Record<string, { name: string; section_name: string; list_name: string; count: number }> = {}
+    for (const item of data) {
+      const key = item.name.toLowerCase().trim()
+      if (freq[key]) { freq[key].count++ }
+      else { freq[key] = { name: item.name, section_name: item.section_name, list_name: item.list_name, count: 1 } }
+    }
+    const current = new Set(sessionItems.map(si => si.name.toLowerCase().trim()))
+    return Object.values(freq)
+      .filter(s => !current.has(s.name.toLowerCase().trim()))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10)
+      .map(({ name, section_name, list_name }) => ({ name, section_name, list_name }))
+  }
+
   async function toggleBought(sessionItemId: string) {
     const si = sessionItems.find(s => s.id === sessionItemId)
     if (!si) return
@@ -926,9 +962,11 @@ export default function App() {
         subsections={subsections}
         onToggleBought={toggleBought}
         onUpdateQuantity={updateSessionItemQuantity}
+        onUpdatePrice={updateSessionItemPrice}
         onAddSessionItem={addSessionItem}
         onCompleteSession={completeSession}
         onClose={() => setShowModal(false)}
+        onFetchSuggestions={fetchSuggestions}
       />
 
       {/* ── Recap modal ── */}

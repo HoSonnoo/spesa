@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useSwipeable } from 'react-swipeable'
 import type { SessionItem, List, Section, Subsection } from '../types'
 
@@ -17,16 +17,58 @@ const CLOSE_ICON = (
   </svg>
 )
 
+// ── SuggestionsStrip ──────────────────────────────────────────────────────────
+
+type Suggestion = { name: string; section_name: string; list_name: string }
+
+function SuggestionsStrip({ onFetch, onAdd }: {
+  onFetch: () => Promise<Suggestion[]>
+  onAdd: (name: string, sectionName: string, listName: string) => void
+}) {
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [dismissed, setDismissed] = useState(false)
+
+  useEffect(() => {
+    onFetch().then(setSuggestions)
+  }, [])
+
+  if (dismissed || suggestions.length === 0) return null
+
+  return (
+    <div className="suggestions-strip">
+      <span className="suggestions-label">Spesso:</span>
+      <div className="suggestions-chips">
+        {suggestions.map((s, i) => (
+          <button
+            key={i}
+            className="suggestion-chip"
+            onClick={() => {
+              onAdd(s.name, s.section_name, s.list_name)
+              setSuggestions(prev => prev.filter((_, j) => j !== i))
+            }}
+          >
+            {s.name}
+          </button>
+        ))}
+      </div>
+      <button className="suggestions-dismiss" onClick={() => setDismissed(true)}>×</button>
+    </div>
+  )
+}
+
 // ── SwipeableItem ─────────────────────────────────────────────────────────────
 
 const THRESH = 72
 
-function SwipeableItem({ si, onToggleBought, onUpdateQuantity }: {
+function SwipeableItem({ si, onToggleBought, onUpdateQuantity, onUpdatePrice }: {
   si: SessionItem
   onToggleBought: (id: string) => void
   onUpdateQuantity: (id: string, qty: number) => void
+  onUpdatePrice: (id: string, price: number) => void
 }) {
   const [swipeX, setSwipeX] = useState(0)
+  const [editingPrice, setEditingPrice] = useState(false)
+  const [priceStr, setPriceStr] = useState(si.price != null ? String(si.price) : ``)
   const isSwiping = Math.abs(swipeX) > 4
 
   const handlers = useSwipeable({
@@ -49,6 +91,15 @@ function SwipeableItem({ si, onToggleBought, onUpdateQuantity }: {
   const clamp = Math.max(-THRESH, Math.min(THRESH, swipeX))
   const progress = Math.abs(clamp) / THRESH
   const isRight = clamp > 0
+
+  function savePriceEdit() {
+    const raw = priceStr.replace(`,`, `.`)
+    const val = parseFloat(raw)
+    const price = isNaN(val) || val < 0 ? 0 : Math.round(val * 100) / 100
+    setPriceStr(price > 0 ? String(price) : ``)
+    onUpdatePrice(si.id, price)
+    setEditingPrice(false)
+  }
 
   return (
     <div
@@ -76,18 +127,43 @@ function SwipeableItem({ si, onToggleBought, onUpdateQuantity }: {
         <span className="qty-val">{si.quantity}</span>
         <button className="qty-btn" onMouseDown={e => e.preventDefault()} onClick={() => onUpdateQuantity(si.id, si.quantity + 1)}>+</button>
       </div>
+      <div className="price-field" onClick={e => e.stopPropagation()}>
+        <span>€</span>
+        {editingPrice ? (
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            className="price-input-inline"
+            value={priceStr}
+            onChange={e => setPriceStr(e.target.value)}
+            onBlur={savePriceEdit}
+            onKeyDown={e => { if (e.key === `Enter`) savePriceEdit(); if (e.key === `Escape`) setEditingPrice(false) }}
+            autoFocus
+          />
+        ) : (
+          <button
+            className="price-display"
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => { setEditingPrice(true); setPriceStr(si.price && si.price > 0 ? String(si.price) : ``) }}
+          >
+            {si.price && si.price > 0 ? si.price.toFixed(2) : `—`}
+          </button>
+        )}
+      </div>
     </div>
   )
 }
 
 // ── SectionCard ───────────────────────────────────────────────────────────────
 
-function SectionCard({ sectionName, items, animKey, onToggleBought, onUpdateQuantity }: {
+function SectionCard({ sectionName, items, animKey, onToggleBought, onUpdateQuantity, onUpdatePrice }: {
   sectionName: string
   items: SessionItem[]
   animKey: number
   onToggleBought: (id: string) => void
   onUpdateQuantity: (id: string, qty: number) => void
+  onUpdatePrice: (id: string, price: number) => void
 }) {
   const boughtCount = items.filter(si => si.bought).length
   const total = items.length
@@ -110,6 +186,7 @@ function SectionCard({ sectionName, items, animKey, onToggleBought, onUpdateQuan
             si={si}
             onToggleBought={onToggleBought}
             onUpdateQuantity={onUpdateQuantity}
+            onUpdatePrice={onUpdatePrice}
           />
         ))}
       </div>
@@ -126,6 +203,7 @@ interface ListSectionsProps {
   subsections: Subsection[]
   onToggleBought: (id: string) => void
   onUpdateQuantity: (id: string, qty: number) => void
+  onUpdatePrice: (id: string, price: number) => void
   onAddSessionItem: (name: string, sectionName: string, listName: string, subsectionId?: string) => void
 }
 
@@ -136,6 +214,7 @@ function ListSections({
   subsections,
   onToggleBought,
   onUpdateQuantity,
+  onUpdatePrice,
   onAddSessionItem,
 }: ListSectionsProps) {
   const [sectionIdx, setSectionIdx] = useState(0)
@@ -150,7 +229,6 @@ function ListSections({
   const touchOnItem = useRef(false)
 
   const listItems = sessionItems.filter(si => si.list_name === list.name)
-  // Collect unique section names in session order
   const sectionNames = listItems.reduce<string[]>((acc, si) => {
     if (si.section_name && !acc.includes(si.section_name)) acc.push(si.section_name)
     return acc
@@ -198,7 +276,6 @@ function ListSections({
       return
     }
     setPendingName(name)
-    // Pre-select section matching current section name
     const matchSec = listSections.find(s => s.name === currentSectionName)
     setModalSectionId(matchSec?.id ?? null)
     setModalSubsectionId(null)
@@ -243,11 +320,11 @@ function ListSections({
             animKey={animKey}
             onToggleBought={onToggleBought}
             onUpdateQuantity={onUpdateQuantity}
+            onUpdatePrice={onUpdatePrice}
           />
         </div>
       )}
 
-      {/* Navigation: arrows + dots */}
       {sectionNames.length > 1 && (
         <div className="section-nav">
           <button
@@ -273,7 +350,6 @@ function ListSections({
         </div>
       )}
 
-      {/* Add item */}
       <div className="session-add">
         {showAdd ? (
           <div className="session-add-form">
@@ -294,7 +370,6 @@ function ListSections({
         )}
       </div>
 
-      {/* Section picker modal */}
       {pendingName && (
         <div className="modal-bg show" onClick={closePickerModal}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -350,9 +425,11 @@ interface Props {
   subsections: Subsection[]
   onToggleBought: (id: string) => void
   onUpdateQuantity: (id: string, qty: number) => void
+  onUpdatePrice: (id: string, price: number) => void
   onAddSessionItem: (name: string, sectionName: string, listName: string, subsectionId?: string) => void
   onCompleteSession: () => void
   onClose: () => void
+  onFetchSuggestions: () => Promise<Array<{ name: string; section_name: string; list_name: string }>>
 }
 
 export default function ShoppingModal({
@@ -363,9 +440,11 @@ export default function ShoppingModal({
   subsections,
   onToggleBought,
   onUpdateQuantity,
+  onUpdatePrice,
   onAddSessionItem,
   onCompleteSession,
   onClose,
+  onFetchSuggestions,
 }: Props) {
   const [listPage, setListPage] = useState(0)
 
@@ -375,6 +454,7 @@ export default function ShoppingModal({
 
   const boughtCount = sessionItems.filter(si => si.bought).length
   const total = sessionItems.length
+  const totalPrice = sessionItems.reduce((sum, si) => sum + (si.price ?? 0) * si.quantity, 0)
 
   if (!show) return null
 
@@ -386,7 +466,11 @@ export default function ShoppingModal({
         <div className="shopping-modal-header">
           <button className="icon-btn" onClick={onClose} title={`Chiudi`}>{CLOSE_ICON}</button>
           <span className="shopping-modal-title">
-            {total > 0 ? `${boughtCount} / ${total} articoli` : `Spesa in corso`}
+            {total > 0
+              ? totalPrice > 0
+                ? `${boughtCount}/${total} · € ${totalPrice.toFixed(2)}`
+                : `${boughtCount} / ${total} articoli`
+              : `Spesa in corso`}
           </span>
           <button className="shopping-modal-complete-btn" onClick={onCompleteSession}>
             Completa ✓
@@ -408,6 +492,12 @@ export default function ShoppingModal({
           </div>
         )}
 
+        {/* ── Suggerimenti da cronologia ── */}
+        <SuggestionsStrip
+          onFetch={onFetchSuggestions}
+          onAdd={onAddSessionItem}
+        />
+
         {/* ── Swipeable list body ── */}
         <div className="shopping-modal-body">
           <div
@@ -423,6 +513,7 @@ export default function ShoppingModal({
                   subsections={subsections}
                   onToggleBought={onToggleBought}
                   onUpdateQuantity={onUpdateQuantity}
+                  onUpdatePrice={onUpdatePrice}
                   onAddSessionItem={onAddSessionItem}
                 />
               </div>
