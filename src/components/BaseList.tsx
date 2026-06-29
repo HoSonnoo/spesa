@@ -534,14 +534,14 @@ export default function BaseList({
     if (hasTargets) setMoveModal({ itemId: item.id })
   }
 
-  // ── Per-section drag handlers ─────────────────────────────────────────────
+  // ── Global drag handlers ──────────────────────────────────────────────────
 
-  function onContentDragStart(e: DragStartEvent) {
+  function onGlobalDragStart(e: DragStartEvent) {
     setDragging(true)
     if (e.active.data.current?.type === 'item') setActiveItemId(String(e.active.id))
   }
 
-  function onContentDragOver(e: DragOverEvent, sectionSubs: Subsection[]) {
+  function onGlobalDragOver(e: DragOverEvent) {
     const { active, over } = e
     if (!over) return
     if (active.data.current?.type !== 'item') return
@@ -555,7 +555,7 @@ export default function BaseList({
       if (!activeItem) return prev
 
       const overItem = prev.find(i => i.id === overId)
-      const overSub = sectionSubs.find(s => s.id === overId)
+      const overSub = subsections.find(s => s.id === overId)
 
       let targetSubId: string | null = null
       if (overItem && overItem.subsection_id !== activeItem.subsection_id) {
@@ -587,8 +587,9 @@ export default function BaseList({
     })
   }
 
-  function onContentDragEnd(e: DragEndEvent, sectionSubs: Subsection[]) {
+  function onGlobalDragEnd(e: DragEndEvent) {
     const activeId = String(e.active.id)
+    const type = e.active.data.current?.type
     const originalSubId = items.find(i => i.id === activeId)?.subsection_id
 
     setDragging(false)
@@ -601,11 +602,17 @@ export default function BaseList({
 
     const overId = String(e.over.id)
 
-    if (e.active.data.current?.type === 'subsection') {
-      if (sectionSubs.some(s => s.id === overId)) onReorderSubsections(activeId, overId)
+    if (type === 'section') {
+      onReorderSections(activeId, overId)
       return
     }
 
+    if (type === 'subsection') {
+      onReorderSubsections(activeId, overId)
+      return
+    }
+
+    // type === 'item'
     const finalItem = localItems.find(i => i.id === activeId)
     if (!finalItem) return
 
@@ -740,14 +747,25 @@ export default function BaseList({
         <div className="empty">Nessun risultato per "{searchQuery}".</div>
       )}
 
-      {/* ── Outer DndContext: sections ── */}
+      {/* ── Single DndContext: sections + subsections + items ── */}
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
-        onDragEnd={(e: DragEndEvent) => {
-          if (e.over) onReorderSections(String(e.active.id), String(e.over.id))
-        }}
+        onDragStart={onGlobalDragStart}
+        onDragOver={onGlobalDragOver}
+        onDragEnd={onGlobalDragEnd}
       >
+        <DragOverlay dropAnimation={null}>
+          {activeItemId ? (() => {
+            const ghost = localItems.find(i => i.id === activeItemId)
+            return ghost ? (
+              <div className="item item--drag-overlay">
+                <span className="drag-handle drag-handle--sm">{GRIP}</span>
+                <span className="item-name">{ghost.name}</span>
+              </div>
+            ) : null
+          })() : null}
+        </DragOverlay>
         <SortableContext items={visibleSections.map(s => s.id)} strategy={verticalListSortingStrategy}>
           {visibleSections.map(section => {
             const allSectionSubs = [...subsections]
@@ -796,13 +814,6 @@ export default function BaseList({
 
                     {/* Section body */}
                     <div className="section-body">
-                      <DndContext
-                        sensors={sensors}
-                        collisionDetection={closestCenter}
-                        onDragStart={onContentDragStart}
-                        onDragOver={e => onContentDragOver(e, allSectionSubs)}
-                        onDragEnd={e => onContentDragEnd(e, allSectionSubs)}
-                      >
                         <SortableContext items={sectionSubs.map(s => s.id)} strategy={verticalListSortingStrategy}>
                           {sectionSubs.map(sub => {
                             const allSubItems = localItems
@@ -939,19 +950,6 @@ export default function BaseList({
                             )
                           })}
                         </SortableContext>
-
-                        <DragOverlay dropAnimation={null}>
-                          {activeItemId ? (() => {
-                            const ghost = localItems.find(i => i.id === activeItemId)
-                            return ghost ? (
-                              <div className="item item--drag-overlay">
-                                <span className="drag-handle drag-handle--sm">{GRIP}</span>
-                                <span className="item-name">{ghost.name}</span>
-                              </div>
-                            ) : null
-                          })() : null}
-                        </DragOverlay>
-                      </DndContext>
 
                       {!sessionActive && !editing && !isSearching && (
                         <div className="sub-add-wrap">
