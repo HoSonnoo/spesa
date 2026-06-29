@@ -729,6 +729,16 @@ main {
   background: var(--primary-soft);
 }
 
+/* ── Move item modal section label ── */
+.move-section-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 2px 4px 6px;
+}
+
 /* ── Move item button ── */
 .item-act--move {
   color: var(--primary);

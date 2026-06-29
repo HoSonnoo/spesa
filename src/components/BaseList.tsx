@@ -267,7 +267,7 @@ export default function BaseList({
   const [showAddSection, setShowAddSection] = useState(false)
   const [editModes, setEditModes] = useState<Record<string, boolean>>({})
   const [deleteSubModal, setDeleteSubModal] = useState<{ subsectionId: string; items: Item[] } | null>(null)
-  const [moveModal, setMoveModal] = useState<{ itemId: string; targets: Subsection[] } | null>(null)
+  const [moveModal, setMoveModal] = useState<{ itemId: string } | null>(null)
   const [exportToast, setExportToast] = useState(false)
   const [showListManager, setShowListManager] = useState(false)
   const [editingListId, setEditingListId] = useState<string | null>(null)
@@ -529,9 +529,9 @@ export default function BaseList({
     }
   }
 
-  function handleMoveItem(item: Item, sectionSubs: Subsection[]) {
-    const targets = sectionSubs.filter(s => s.id !== item.subsection_id)
-    if (targets.length > 0) setMoveModal({ itemId: item.id, targets })
+  function handleMoveItem(item: Item) {
+    const hasTargets = subsections.some(s => s.id !== item.subsection_id)
+    if (hasTargets) setMoveModal({ itemId: item.id })
   }
 
   // ── Per-section drag handlers ─────────────────────────────────────────────
@@ -838,7 +838,7 @@ export default function BaseList({
                                       {subItems.map(item => {
                                         const isSelected = selectedIds.has(item.id)
                                         const isEditing = editingId === item.id
-                                        const canMove = allSectionSubs.length > 1
+                                        const canMove = subsections.some(s => s.id !== item.subsection_id)
 
                                         return (
                                           <SortableRow key={item.id} id={item.id} data={{ type: 'item' }}>
@@ -879,8 +879,8 @@ export default function BaseList({
                                                     {canMove && (
                                                       <button
                                                         className="item-act item-act--move"
-                                                        title="Sposta in altra sottocategoria"
-                                                        onClick={() => handleMoveItem(item, allSectionSubs)}
+                                                        title="Sposta in altra categoria"
+                                                        onClick={() => handleMoveItem(item)}
                                                       >
                                                         {MOVE_ICON}
                                                       </button>
@@ -1094,31 +1094,74 @@ export default function BaseList({
       )}
 
       {/* ── Move item modal ── */}
-      {moveModal && (
-        <div className="modal-bg show" onClick={() => setMoveModal(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>Sposta in…</h2>
-            <p className="sub">Scegli la sottocategoria di destinazione.</p>
-            <div className="sub-pick-list">
-              {moveModal.targets.map(target => (
-                <button
-                  key={target.id}
-                  className="sub-pick-btn"
-                  onClick={() => {
-                    onMoveItemToSubsection(moveModal.itemId, target.id)
-                    setMoveModal(null)
-                  }}
-                >
-                  {target.name || `(senza nome)`}
-                </button>
-              ))}
-            </div>
-            <div className="modal-btns">
-              <button className="btn-ghost" onClick={() => setMoveModal(null)}>Annulla</button>
+      {moveModal && (() => {
+        const movingItem = items.find(i => i.id === moveModal.itemId)
+        if (!movingItem) return null
+        const currentSub = subsections.find(s => s.id === movingItem.subsection_id)
+        const currentSectionId = currentSub?.section_id
+
+        const allSortedSections = [...sections].sort((a, b) => a.position - b.position)
+        const grouped = allSortedSections.map(section => ({
+          section,
+          subs: subsections
+            .filter(s => s.section_id === section.id && s.id !== movingItem.subsection_id)
+            .sort((a, b) => a.position - b.position),
+        })).filter(g => g.subs.length > 0)
+
+        const sameSectionGroup = grouped.find(g => g.section.id === currentSectionId)
+        const otherGroups = grouped.filter(g => g.section.id !== currentSectionId)
+
+        return (
+          <div className="modal-bg show" onClick={() => setMoveModal(null)}>
+            <div className="modal" onClick={e => e.stopPropagation()}>
+              <h2>{`Sposta "${movingItem.name}"`}</h2>
+
+              {sameSectionGroup && (
+                <>
+                  <p className="sub">Stessa categoria</p>
+                  <div className="sub-pick-list">
+                    {sameSectionGroup.subs.map(target => (
+                      <button
+                        key={target.id}
+                        className="sub-pick-btn"
+                        onClick={() => { onMoveItemToSubsection(moveModal.itemId, target.id); setMoveModal(null) }}
+                      >
+                        {target.name || `(senza nome)`}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {otherGroups.length > 0 && (
+                <>
+                  <p className="sub">{sameSectionGroup ? `Altre categorie` : `Scegli la destinazione`}</p>
+                  {otherGroups.map(({ section, subs }) => (
+                    <div key={section.id}>
+                      <div className="move-section-label">{section.emoji || `📦`} {section.name}</div>
+                      <div className="sub-pick-list">
+                        {subs.map(target => (
+                          <button
+                            key={target.id}
+                            className="sub-pick-btn"
+                            onClick={() => { onMoveItemToSubsection(moveModal.itemId, target.id); setMoveModal(null) }}
+                          >
+                            {target.name || `(senza nome)`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+
+              <div className="modal-btns">
+                <button className="btn-ghost" onClick={() => setMoveModal(null)}>Annulla</button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* ── Import modal ── */}
       {importRows && (
