@@ -960,6 +960,7 @@ export default function App() {
         lists={lists}
         sections={sections}
         subsections={subsections}
+        items={items}
         onToggleBought={toggleBought}
         onUpdateQuantity={updateSessionItemQuantity}
         onUpdatePrice={updateSessionItemPrice}

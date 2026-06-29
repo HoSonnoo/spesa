@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useSwipeable } from 'react-swipeable'
-import type { SessionItem, List, Section, Subsection } from '../types'
+import type { SessionItem, List, Section, Subsection, Item } from '../types'
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 
@@ -198,9 +198,11 @@ function SectionCard({ sectionName, items, animKey, onToggleBought, onUpdateQuan
 
 interface ListSectionsProps {
   list: List
+  lists: List[]
   sessionItems: SessionItem[]
   sections: Section[]
   subsections: Subsection[]
+  items: Item[]
   onToggleBought: (id: string) => void
   onUpdateQuantity: (id: string, qty: number) => void
   onUpdatePrice: (id: string, price: number) => void
@@ -209,9 +211,11 @@ interface ListSectionsProps {
 
 function ListSections({
   list,
+  lists,
   sessionItems,
   sections,
   subsections,
+  items,
   onToggleBought,
   onUpdateQuantity,
   onUpdatePrice,
@@ -246,6 +250,22 @@ function ListSections({
     : []
   const namedSubs = selectedSectionSubs.filter(s => s.name !== ``)
   const canConfirm = !!modalSectionId && (namedSubs.length === 0 || !!modalSubsectionId)
+
+  const inputTrimmed = addName.trim().toLowerCase()
+  const addSuggestions: Item[] = showAdd && inputTrimmed.length > 0
+    ? items.filter(i => i.name.toLowerCase().includes(inputTrimmed)).slice(0, 6)
+    : []
+
+  function handleSuggestionPick(item: Item) {
+    const sub = subsections.find(s => s.id === item.subsection_id)
+    const sec = sub ? sections.find(s => s.id === sub.section_id) : null
+    const secList = sec ? lists.find(l => l.id === sec.list_id) : null
+    const sectionName = sec?.name ?? currentSectionName ?? list.name
+    const listName = secList?.name ?? list.name
+    onAddSessionItem(item.name, sectionName, listName)
+    setAddName(``)
+    setShowAdd(false)
+  }
 
   function navigate(newIdx: number) {
     setSectionIdx(newIdx)
@@ -352,17 +372,38 @@ function ListSections({
 
       <div className="session-add">
         {showAdd ? (
-          <div className="session-add-form">
-            <input
-              placeholder={currentSectionName ? `Aggiungi a ${currentSectionName}…` : `Nome articolo…`}
-              value={addName}
-              onChange={e => setAddName(e.target.value)}
-              onKeyDown={e => { if (e.key === `Enter`) handleAdd() }}
-              autoFocus
-            />
-            <button className="session-add-confirm" onClick={handleAdd}>+</button>
-            <button className="btn-cancel-sm" onClick={() => { setShowAdd(false); setAddName(``) }}>✕</button>
-          </div>
+          <>
+            <div className="session-add-form">
+              <input
+                placeholder={currentSectionName ? `Aggiungi a ${currentSectionName}…` : `Nome articolo…`}
+                value={addName}
+                onChange={e => setAddName(e.target.value)}
+                onKeyDown={e => { if (e.key === `Enter`) handleAdd() }}
+                autoFocus
+              />
+              <button className="session-add-confirm" onClick={handleAdd}>+</button>
+              <button className="btn-cancel-sm" onClick={() => { setShowAdd(false); setAddName(``) }}>✕</button>
+            </div>
+            {addSuggestions.length > 0 && (
+              <div className="add-suggestions">
+                {addSuggestions.map(item => {
+                  const sub = subsections.find(s => s.id === item.subsection_id)
+                  const sec = sub ? sections.find(s => s.id === sub.section_id) : null
+                  return (
+                    <button
+                      key={item.id}
+                      className="add-suggestion-row"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => handleSuggestionPick(item)}
+                    >
+                      <span className="add-suggestion-name">{item.name}</span>
+                      {sec && <span className="add-suggestion-section">{sec.emoji || `📦`} {sec.name}</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </>
         ) : (
           <button className="session-add-btn" onClick={() => setShowAdd(true)}>
             {`+ Aggiungi a ${list.name}`}
@@ -423,6 +464,7 @@ interface Props {
   lists: List[]
   sections: Section[]
   subsections: Subsection[]
+  items: Item[]
   onToggleBought: (id: string) => void
   onUpdateQuantity: (id: string, qty: number) => void
   onUpdatePrice: (id: string, price: number) => void
@@ -438,6 +480,7 @@ export default function ShoppingModal({
   lists,
   sections,
   subsections,
+  items,
   onToggleBought,
   onUpdateQuantity,
   onUpdatePrice,
@@ -508,9 +551,11 @@ export default function ShoppingModal({
               <div key={list.id} className="shopping-page-slot">
                 <ListSections
                   list={list}
+                  lists={lists}
                   sessionItems={sessionItems}
                   sections={sections}
                   subsections={subsections}
+                  items={items}
                   onToggleBought={onToggleBought}
                   onUpdateQuantity={onUpdateQuantity}
                   onUpdatePrice={onUpdatePrice}
